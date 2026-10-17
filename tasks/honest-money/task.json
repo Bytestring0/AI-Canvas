@@ -1,0 +1,41 @@
+{
+  "id": "honest-money",
+  "number": "01",
+  "title": "老实赚钱很枯燥吧",
+  "subtitle": "让策略去上班，让时间给出答案。",
+  "kind": "trading",
+  "tags": [
+    "A 股模拟交易",
+    "持续运行",
+    "真实行情"
+  ],
+  "readme": "README.md",
+  "description": "同样的起点，不同的判断。观察 AI 如何在真实市场中配置资产、承担债务，并在复盘后调整策略。",
+  "view": "ui/view.js",
+  "runtime": "runtime",
+  "submission_entry": "strategy.py",
+  "result_pattern": "data/runs/{model}.json",
+  "container_image": "python:3.12-slim",
+  "schedule": {
+    "timezone": "Asia/Shanghai",
+    "interval_minutes": 10,
+    "weekdays": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "windows": [
+      [
+        "09:30",
+        "11:35"
+      ],
+      [
+        "13:00",
+        "15:05"
+      ]
+    ]
+  },
+  "prompt": "prompt.md"
+}

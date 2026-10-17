@@ -1,0 +1,212 @@
+[
+  {
+    "id": "gpt6",
+    "name": "GPT 6",
+    "provider": "OpenAI",
+    "color": "#697c8c",
+    "description": "成果展示标识；具体生成版本以 submission.model_version 为准，不表示已配置 API。"
+  },
+  {
+    "id": "gpt-6-1-sol",
+    "name": "GPT 6.1 Sol",
+    "provider": "OpenAI",
+    "color": "#5b7083",
+    "description": "成果展示标识；具体生成版本以 submission.model_version 为准，不表示已配置 API。"
+  },
+  {
+    "id": "gpt-6-astra",
+    "name": "GPT 6 Astra",
+    "provider": "OpenAI",
+    "color": "#89775a",
+    "description": "成果展示标识；具体生成版本以 submission.model_version 为准，不表示已配置 API。"
+  },
+  {
+    "id": "gpt-6-sol",
+    "name": "GPT 6 Sol",
+    "provider": "OpenAI",
+    "color": "#6f7f68",
+    "description": "成果展示标识；具体生成版本以 submission.model_version 为准，不表示已配置 API。"
+  },
+  {
+    "id": "gpt-6-luna",
+    "name": "GPT 6 Luna",
+    "provider": "OpenAI",
+    "color": "#8a6872",
+    "description": "成果展示标识；具体生成版本以 submission.model_version 为准，不表示已配置 API。"
+  },
+  {
+    "id": "gpt-5-6-sol",
+    "name": "GPT 5.6 Sol",
+    "provider": "OpenAI",
+    "color": "#697c8c",
+    "description": "成果展示标识；具体生成版本以 submission.model_version 为准，不表示已配置 API。"
+  },
+  {
+    "id": "deepseek-4-1-flash",
+    "name": "DeepSeek 4.1 Flash",
+    "provider": "DeepSeek",
+    "color": "#857460",
+    "description": "按用户提供的名称登记；提供方与确切版本可后续调整。"
+  },
+  {
+    "id": "u2-flash",
+    "name": "U2 Flash",
+    "provider": "未指定",
+    "color": "#7d6b8b",
+    "description": "按用户提供的名称登记；提供方与确切版本可后续调整。"
+  },
+  {
+    "id": "claude-opus-4-6",
+    "name": "Claude Opus 4.6",
+    "provider": "Anthropic",
+    "color": "#597c7b",
+    "description": "成果展示标识；具体生成版本以 submission.model_version 为准，不表示已配置 API。"
+  },
+  {
+    "id": "claude-sonnet-4-6",
+    "name": "Claude Sonnet 4.6",
+    "provider": "Anthropic",
+    "color": "#5b7083",
+    "description": "成果展示标识；具体生成版本以 submission.model_version 为准，不表示已配置 API。"
+  },
+  {
+    "id": "claude-haiku-4-5",
+    "name": "Claude Haiku 4.5",
+    "provider": "Anthropic",
+    "color": "#89775a",
+    "description": "成果展示标识；具体生成版本以 submission.model_version 为准，不表示已配置 API。"
+  },
+  {
+    "id": "gemini-3-1-pro",
+    "name": "Gemini 3.1 Pro",
+    "provider": "Google",
+    "color": "#6f7f68",
+    "description": "成果展示标识；具体生成版本以 submission.model_version 为准，不表示已配置 API。"
+  },
+  {
+    "id": "gemini-3-flash",
+    "name": "Gemini 3 Flash",
+    "provider": "Google",
+    "color": "#8a6872",
+    "description": "成果展示标识；具体生成版本以 submission.model_version 为准，不表示已配置 API。"
+  },
+  {
+    "id": "gemini-2-5-pro",
+    "name": "Gemini 2.5 Pro",
+    "provider": "Google",
+    "color": "#697c8c",
+    "description": "成果展示标识；具体生成版本以 submission.model_version 为准，不表示已配置 API。"
+  },
+  {
+    "id": "minicpm5-1b",
+    "name": "MiniCPM5-1B(本地)",
+    "provider": "本地",
+    "color": "#857460",
+    "description": "成果展示标识；具体生成版本以 submission.model_version 为准，不表示已配置 API。"
+  },
+  {
+    "id": "deepseek-flash",
+    "name": "DeepSeek Flash",
+    "provider": "DeepSeek",
+    "color": "#7d6b8b",
+    "description": "成果展示标识；具体生成版本以 submission.model_version 为准，不表示已配置 API。"
+  },
+  {
+    "id": "deepseek-v3-2",
+    "name": "DeepSeek V3.2",
+    "provider": "DeepSeek",
+    "color": "#597c7b",
+    "description": "成果展示标识；具体生成版本以 submission.model_version 为准，不表示已配置 API。"
+  },
+  {
+    "id": "deepseek-r1",
+    "name": "DeepSeek R1",
+    "provider": "DeepSeek",
+    "color": "#5b7083",
+    "description": "成果展示标识；具体生成版本以 submission.model_version 为准，不表示已配置 API。"
+  },
+  {
+    "id": "kimi-k2-5",
+    "name": "Kimi K2.5",
+    "provider": "Moonshot AI",
+    "color": "#89775a",
+    "description": "成果展示标识；具体生成版本以 submission.model_version 为准，不表示已配置 API。"
+  },
+  {
+    "id": "doubao",
+    "name": "DouBao",
+    "provider": "ByteDance",
+    "color": "#6f7f68",
+    "description": "成果展示标识；具体生成版本以 submission.model_version 为准，不表示已配置 API。"
+  },
+  {
+    "id": "qwen3-5-plus",
+    "name": "Qwen3.5 Plus",
+    "provider": "Alibaba",
+    "color": "#8a6872",
+    "description": "成果展示标识；具体生成版本以 submission.model_version 为准，不表示已配置 API。"
+  },
+  {
+    "id": "qwen3-max",
+    "name": "Qwen3 Max",
+    "provider": "Alibaba",
+    "color": "#697c8c",
+    "description": "成果展示标识；具体生成版本以 submission.model_version 为准，不表示已配置 API。"
+  },
+  {
+    "id": "qwen3-8-flash",
+    "name": "Qwen3 Coder",
+    "provider": "Alibaba",
+    "color": "#857460",
+    "description": "成果展示标识；具体生成版本以 submission.model_version 为准，不表示已配置 API。"
+  },
+  {
+    "id": "glm-5",
+    "name": "GLM-5",
+    "provider": "Z.ai",
+    "color": "#7d6b8b",
+    "description": "成果展示标识；具体生成版本以 submission.model_version 为准，不表示已配置 API。"
+  },
+  {
+    "id": "glm-4-7",
+    "name": "GLM-4.7",
+    "provider": "Z.ai",
+    "color": "#597c7b",
+    "description": "成果展示标识；具体生成版本以 submission.model_version 为准，不表示已配置 API。"
+  },
+  {
+    "id": "minimax-m2-5",
+    "name": "MiniMax M2.5",
+    "provider": "MiniMax",
+    "color": "#5b7083",
+    "description": "成果展示标识；具体生成版本以 submission.model_version 为准，不表示已配置 API。"
+  },
+  {
+    "id": "grok-4",
+    "name": "Grok 4",
+    "provider": "xAI",
+    "color": "#89775a",
+    "description": "成果展示标识；具体生成版本以 submission.model_version 为准，不表示已配置 API。"
+  },
+  {
+    "id": "claude",
+    "name": "Claude",
+    "provider": "Anthropic",
+    "color": "#6f7f68",
+    "description": "成果展示标识；具体生成版本以 submission.model_version 为准，不表示已配置 API。"
+  },
+  {
+    "id": "gpt",
+    "name": "GPT",
+    "provider": "OpenAI",
+    "color": "#8a6872",
+    "description": "成果展示标识；具体生成版本以 submission.model_version 为准，不表示已配置 API。"
+  },
+  {
+    "id": "gemini",
+    "name": "Gemini",
+    "provider": "Google",
+    "color": "#697c8c",
+    "description": "成果展示标识；具体生成版本以 submission.model_version 为准，不表示已配置 API。"
+  }
+]

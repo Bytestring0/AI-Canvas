@@ -1,0 +1,20 @@
+{
+  "id": "rainy-store",
+  "number": "02",
+  "title": "雨夜便利店",
+  "subtitle": "同一个雨夜，会有多少种想象？",
+  "kind": "html",
+  "prompt": "prompt.md",
+  "tags": [
+    "HTML 创作",
+    "视觉表达",
+    "交互体验"
+  ],
+  "readme": "README.md",
+  "description": "从同一份提示词出发，比较不同模型交付的网页。作品在隔离预览中运行，也可以查看源码。",
+  "view": "ui/view.js",
+  "runtime": "runtime",
+  "submission_entry": "index.html",
+  "result_pattern": "data/runs/{model}.json",
+  "schedule": null
+}

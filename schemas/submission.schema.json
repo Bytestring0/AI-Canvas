@@ -1,0 +1,25 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "title":"AI Canvas submission v1",
+  "type":"object",
+  "required":["schema_version","task","model","model_version","revisions"],
+  "properties":{
+    "schema_version":{"const":1},
+    "task":{"type":"string","pattern":"^[a-z0-9]+(-[a-z0-9]+)*$"},
+    "model":{"type":"string","pattern":"^[a-z0-9]+(-[a-z0-9]+)*$"},
+    "model_version":{"type":"string","minLength":1},
+    "revisions":{
+      "type":"array","minItems":1,
+      "items":{
+        "type":"object","required":["id","effective_from","directory","note"],
+        "properties":{
+          "id":{"type":"string","pattern":"^[a-z0-9]+(-[a-z0-9]+)*$"},
+          "effective_from":{"type":"string","description":"ISO date or timezone-aware datetime; task defines activation semantics"},
+          "directory":{"type":"string","minLength":1},
+          "note":{"type":"string","minLength":1},
+          "prompt_sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"}
+        }
+      }
+    }
+  }
+}

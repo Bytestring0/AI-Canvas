@@ -1,0 +1,1235 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8" />
+    <title>雨夜便利店街角</title>
+    <style>
+        body {
+            background: #1a1f2e;
+            color: #fff;
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            line-height: 1.5;
+            overflow-x: auto;
+        }
+
+        canvas {
+            display: block;
+            width: 500px;
+            height: 400px;
+        }
+
+        .model-layer {
+            position: fixed; /* 固定层，便于拖拽和旋转 */
+            top: 20px;
+            left: 20px;
+            z-index: 1000;
+            background: rgba(30, 40, 60, 0.7);
+            border-radius: 12px;
+            box-shadow: 2px 2px 10px #000;
+        }
+
+        h1 {
+            font-size: 20px;
+            margin: 5px 0 0;
+            text-align: center;
+        }
+
+        p {
+            max-width: 600px;
+            text-align: left;
+            color: #a6d8ff; /* 柔和的夜景色 */
+        }
+
+        .core-objects-container {
+            margin-top: 15px;
+        }
+
+        .object-list {
+            list-style: none;
+            padding: 0;
+        }
+
+        .object-item {
+            display: flex;
+            align-items: center;
+            padding: 8px 12px;
+            border-radius: 6px;
+            margin-bottom: 5px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .object-btn {
+            background: #fff;
+            color: #4a9dbf;
+            border: none;
+            padding: 2px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            text-decoration: none;
+        }
+
+        .object-btn:hover {
+            opacity: 0.7;
+        }
+
+        .instruction {
+            margin-top: 10px;
+            font-size: 14px;
+            color: #a6d8ff;
+        }
+
+        .physics-notes {
+            position: absolute;
+            top: 50%;
+            left: 20px;
+            color: #a6d8ff;
+            font-style: italic;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="model-layer" id="scene">
+        <h1>雨夜便利店街角</h1>
+        <p>可自由拖拽、旋转、缩放观看的微缩三维模型；底层为正方形底座（100x100）；内容：日式便利店、玻璃橱窗、自动门、屋檐雨棚、便当区、冰柜、宣传海报、灯箱、收银台等。材质干净、轮廓明确；氛围：安静、治愈、都市夜晚孤独感但温暖；风格：三渲二、浓厚的日式二次元动画。</p>
+        <div class="core-objects-container">
+            <ul class="object-list" id="objectsList"></ul>
+            <div class="instruction">内部有：货架、柜子、收银台、冰柜、杂志、宣传海报、灯箱、便当、饮料、零食等；与雨夜街景鲜明对比。</div>
+        </div>
+    </div>
+
+    <canvas id="sceneCanvas"></canvas>
+
+<script>
+    const scene = document.getElementById('scene');
+    const canvas = document.getElementById('sceneCanvas');
+    const objectsList = document.querySelector('#objectsList');
+
+    let currentSize = 100; // 底座尺寸，可拖拽并缩放
+
+    function resize() {
+        let width = canvas.width;
+        let height = canvas.height;
+        if (width < 60) width = 60;
+        if (height < 400) height = 400;
+        scene.style.minWidth = width + 'px';
+        scene.style.minHeight = height + 'px';
+        canvas.style.height = Math.max(height, scene.offsetHeight) + 'px';
+    }
+
+    function resizeBottom(px) {
+        if (!Number.isFinite(px)) return;
+        currentSize = Math.max(5, px);
+        resize();
+    }
+
+    function drawScene() {
+        // 绘制底层正方形底座（可拖拽缩放）
+        const rect = canvas.getBoundingClientRect();
+        const bottom = rect.bottom + window.scrollY;
+        const topLeft = { x: -bottom, y: bottom };
+        const bottomRight = { x: width - bottom, y: bottom };
+
+        // 绘制底层：正方形（边长 currentSize，居中）
+        function drawRect(px, y) {
+            const rectStyle = {
+                left: px + (width / 2),
+                top: y,
+                width: Math.min(currentSize * 2, 200), // 约 100-200
+                height: Math.min(currentSize * 2, 180)  // 约 100-180
+            };
+            const canvasRect = canvas.getBoundingClientRect();
+            const rectStyleObj = {
+                left: (canvas.width / 2) - rect.x,
+                top: y - 20,
+                width: rect.width - (canvas.width/2),
+                height: rect.height
+            };
+            context.beginPath(); context.restore();
+            context.fillRect(rectLeft, y + rectStyleObj.top);
+        }
+
+        drawRect(topLeft, bottom);
+        drawRect(bottomRight, top);
+
+        // 绘制底层：可拖拽缩放的矩形（底座）
+        const bottomRect = document.createElement('rect');
+        bottomRect.style.width = `${currentSize}px`;
+        bottomRect.style.height = `${currentSize * 1.5}px`; // 约 150-200
+        bottomRect.style.left = -bottom + 'px';
+        bottomRect.style.top = bottom + 'px';
+        objectsList.appendChild(bottomRect);
+        resize();
+
+    }
+
+    function toggleRotation() {
+        const rects = document.querySelectorAll('rect');
+        rects.forEach(el => el.style.transform = 'scale(1)');
+    }
+
+    function toggleScale() {
+        if (objectsList.children.length > 0) {
+            resize();
+        } else {
+            resizeBottom(currentSize - 5); // 缩小底座
+        }
+    }
+
+    function addObject(obj) {
+        const div = document.createElement('div');
+        div.className = 'object';
+        div.textContent = obj;
+        objectsList.appendChild(div);
+        toggleRotation();
+        resize(); // 重新调整比例以适应对象
+    }
+
+    function removeObject(evt) {
+        evt.stopImmediatePropagation();
+        const el = evt.currentTarget;
+        if (el === addObject.call(this)) {
+            toggleRotation();
+            resizeBottom(currentSize - 5);
+        }
+    }
+
+    // 初始状态：底座 100px，旋转 0%，缩放 1.5 倍
+    resizeBottom(100);
+    toggleRotation();
+    addObject('货架');
+    addObject('柜子');
+    addObject('收银台');
+    addObject('冰柜');
+    addObject('杂志/宣传海报/灯箱/便当/饮料/零食等');
+    addObject('自动门/屋檐雨棚/自行车/雨伞/垃圾桶/路灯/电线杆/道路/反光/小巷/空调');
+
+    // 动画：持续降雨、屋檐滴水、水面积水、自动门开合、雨水沿玻璃滑落等
+    const FPS = 30;
+    let rainfall = 5; // 持续降雨量，0-10
+    let raindrops = [];
+    let rainEffect = { scale: 1.2, opacity: 0 };
+
+    function updateRainfall() {
+        let deltaY = FPS * 0.05 + rainfall;
+        if (deltaY > 5) deltaY = 5; // 防止过快动画
+        raindrops.forEach(el => el.style.opacity = '0.7');
+    }
+
+    function addRaindrops(count, color = '#a6d8ff') {
+        const els = document.querySelectorAll('.object-btn');
+        for (let i = 1; i <= count; i++) {
+            const btn = els[i];
+            btn.style.opacity = '0.5';
+            btn.textContent += `（${i}`;
+            setTimeout(() => addObject(btn.children[0]), 10);
+        }
+    }
+
+    function addRainEffect() {
+        const canvasRect = canvas.getBoundingClientRect();
+        const rainWidth = Math.min(currentSize, 100); // 雨帘宽度
+        const rainY = currentSize + 60; // 高于底座
+        const rainX = -currentSize / 2;
+        const rainRect = { left: rainX, top: rainY, width: rainWidth * 1.5, height: 30 };
+        context.beginPath(); context.restore();
+        context.fillStyle = `rgba(30, 40, 60, 0.8) url('data:image/svg+xml;utf8,<svg xmlns=� xsi=\d+x\x0c10\sxmlns:browser=\d+x;\sxnsx:\d+x' width="100" height="30" viewBox="0 0 100 40" fill='white'><rect width="100" height="30" fill='rgba(30,40,60,0.8)' rx="10" ry="20"/></svg>}`;
+        context.fillRect(rainX + (currentSize * 1.5), rainY - currentSize, rainWidth, 20);
+        context.shadowBlur = '4';
+    }
+
+    function addFlooringEffect() {
+        const floorStyle = 'rgba(30, 40, 60, 0.3)';
+        context.fillStyle = floorStyle;
+        canvasRect.width = currentSize * 2; // 底层可拖拽，但地板固定为当前尺寸
+        drawScene(); // 根据拖拽缩放重新绘出底层
+    }
+
+    function updateFlooring() {
+        const floorStyle = `rgba(30, 40, 60, 0.3)`;
+        context.fillStyle = floorStyle;
+        canvasRect.width = currentSize * 2; // 底层可拖拽，但地板固定为当前尺寸
+        drawScene();
+    }
+
+    function addTrafficEffect() {
+        const traffic = document.querySelector('[aria-live]');
+        if (traffic) traffic.textContent += '（交通）';
+        setTimeout(addTraffic, 100);
+    }
+
+    function addLightingEffect() {
+        // 小灯箱闪烁，提示
+        const lightCtxt = context.createText2D({
+            x: -currentSize / 2,
+            y: currentSize + 50,
+            text: '灯箱',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSignEffect() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40, // 偏左
+            y: currentSize + 60,
+            text: '路牌/公告',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40,
+            y: currentSize + 60,
+            text: '小巷入口',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40,
+            y: currentSize + 60,
+            text: '空调外机',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40,
+            y: currentSize + 60,
+            text: '小型公告/海报',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40,
+            y: currentSize + 60,
+            text: '自动贩卖机',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40,
+            y: currentSize + 60,
+            text: '垃圾桶',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40,
+            y: currentSize + 60,
+            text: '电线杆',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40,
+            y: currentSize + 60,
+            text: '道路',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40,
+            y: currentSize + 60,
+            text: '反光斑马线',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40,
+            y: currentSize + 60,
+            text: '小巷入口 (小巷)',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40,
+            y: currentSize + 60,
+            text: '空调外机 (小型)',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40,
+            y: currentSize + 60,
+            text: '便当/零食',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40,
+            y: currentSize + 60,
+            text: '自行车',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40,
+            y: currentSize + 60,
+            text: '雨伞',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40,
+            y: currentSize + 60,
+            text: '垃圾桶',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40,
+            y: currentSize + 60,
+            text: '电线杆',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40,
+            y: currentSize + 60,
+            text: '道路',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40,
+            y: currentSize + 60,
+            text: '反光斑马线',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40,
+            y: currentSize + 60,
+            text: '小巷入口 (小巷)',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40,
+            y: currentSize + 60,
+            text: '空调外机 (小型)',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40,
+            y: currentSize + 60,
+            text: '便当/零食',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40,
+            y: currentSize + 60,
+            text: '自行车',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40,
+            y: currentSize + 60,
+            text: '雨伞',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40,
+            y: currentSize + 60,
+            text: '垃圾桶',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40,
+            y: currentSize + 60,
+            text: '电线杆',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40,
+            y: currentSize + 60,
+            text: '道路',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40,
+            y: currentSize + 60,
+            text: '反光斑马线',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40,
+            y: currentSize + 60,
+            text: '小巷入口 (小巷)',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40,
+            y: currentSize + 60,
+            text: '空调外机 (小型)',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40,
+            y: currentSize + 60,
+            text: '便当/零食',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40,
+            y: currentSize + 60,
+            text: '自行车',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40,
+            y: currentSize + 60,
+            text: '雨伞',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    // 键盘操作：向上/向下滚动（可观察底层）、左右拖拽底座、缩放与旋转
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+            e.preventDefault();
+            resizeBottom(currentSize + (e.key === 'ArrowUp' ? 5 : -5));
+            toggleRotation();
+        }
+        if (e.key === 'w' && !isEmpty()) {
+            resize();
+            toggleScale();
+        }
+        if (e.key === '↑' && !isEmpty()) {
+            resizeBottom(currentSize - 5); // 缩小底座
+            toggleRotation();
+        }
+    });
+
+    document.addEventListener('keyup', (e) => {
+        if (e.ctrlKey || e.metaKey) {
+            toggleScale();
+            toggleRotation();
+        }
+    });
+
+    function isEmpty() {
+        return !objectsList.children.length;
+    }
+
+    // 持续降雨与动态效果
+    let rain = 5; // 持续降雨量，0-10
+
+    function addRaindrops(count) {
+        for (let i = 1; i <= count; i++) {
+            const btn = document.querySelector('.object-btn');
+            const div = document.createElement('div');
+            div.className = 'object';
+            div.textContent = `(雨，${i})`;
+            btn.appendChild(div);
+            setTimeout(() => addObject(btn.children[0]), 10);
+        }
+    }
+
+    function addRainEffect() {
+        const canvasRect = canvas.getBoundingClientRect();
+        const rainWidth = Math.min(currentSize, 100); // 约 100-200
+        const rainY = currentSize + 60; // 高于底座
+        const rainX = -currentSize / 2;
+        const rainRect = { left: rainX, top: rainY, width: rainWidth * 1.5, height: 30 };
+        context.beginPath(); context.restore();
+        const fillStyle = `rgba(30, 40, 60, 0.8) url('data:image/svg+xml;utf8,<svg xmlns=� xsi=\d+x;\sxnsx:\d+x' width="100" height="30" viewBox="0 0 100 40" fill='white'><rect width="100" height="30" fill='rgba(30,40,60,0.8)' rx="10" ry="20"/></svg>}`;
+        context.fillRect(rainX + (currentSize * 1.5), rainY - currentSize, rainWidth, 20);
+        context.shadowBlur = '4';
+    }
+
+    function updateRainfall() {
+        let deltaY = FPS * 0.05 + rain; // FPS 30
+        if (deltaY > 5) deltaY = 5;
+        raindrops.forEach(el => el.style.opacity = '0.7');
+    }
+
+    function addFlooringEffect() {
+        const floorStyle = 'rgba(30, 40, 60, 0.3)';
+        context.fillStyle = floorStyle;
+        canvasRect.width = currentSize * 2; // 底层可拖拽，但地板固定为当前尺寸
+        drawScene(); // 根据拖拽缩放重新绘出底层
+    }
+
+    function updateFlooring() {
+        const floorStyle = `rgba(30, 40, 60, 0.3)`;
+        context.fillStyle = floorStyle;
+        canvasRect.width = currentSize * 2; // 底层可拖拽，但地板固定为当前尺寸
+        drawScene();
+    }
+
+    function addTrafficEffect() {
+        const traffic = document.querySelector('[aria-live]');
+        if (traffic) traffic.textContent += '（交通）';
+        setTimeout(addTraffic, 100);
+    }
+
+    function addLightingEffect() {
+        context.createText2D({
+            x: -currentSize / 2,
+            y: currentSize + 50,
+            text: '灯箱',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSignEffect() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40, // 偏左
+            y: currentSize + 60,
+            text: '路牌/公告',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40, // 偏左
+            y: currentSize + 60,
+            text: '小型公告/海报',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40, // 偏左
+            y: currentSize + 60,
+            text: '空调外机',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40, // 偏左
+            y: currentSize + 60,
+            text: '便当/零食',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40, // 偏左
+            y: currentSize + 60,
+            text: '自行车',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40, // 偏左
+            y: currentSize + 60,
+            text: '雨伞',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40, // 偏左
+            y: currentSize + 60,
+            text: '垃圾桶',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40, // 偏左
+            y: currentSize + 60,
+            text: '电线杆',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40, // 偏左
+            y: currentSize + 60,
+            text: '道路',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40, // 偏左
+            y: currentSize + 60,
+            text: '反光斑马线',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40, // 偏左
+            y: currentSize + 60,
+            text: '小巷入口 (小巷)',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40, // 偏左
+            y: currentSize + 60,
+            text: '空调外机 (小型)',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40, // 偏左
+            y: currentSize + 60,
+            text: '便当/零食',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40, // 偏左
+            y: currentSize + 60,
+            text: '自行车',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40, // 偏左
+            y: currentSize + 60,
+            text: '雨伞',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    // 交互：拖拽底座、缩放与旋转、滚动观察底层
+    document.addEventListener('mousedown', handleDrag);
+    document.addEventListener('touchstart', handleTouch);
+    document.addEventListener('keydown', handleKeyboard);
+    document.addEventListener('mouseup', setScaleAndRotate);
+    document.addEventListener('scrollchange', setSize);
+
+    function handleDrag(e) {
+        const rect = canvas.getBoundingClientRect();
+        e.preventDefault(); // 避免拖动底层
+        resizeBottom(rect.width + window.innerHeight / 2); // 居中底座
+        toggleRotation();
+        toggleScale();
+    }
+
+    function handleTouch(e) {
+        let touch = e.touches[0];
+        const rect = canvas.getBoundingClientRect();
+        if (touch.clientX < rect.left || touch.clientY < rect.top) return;
+        resizeBottom(touch.clientX - rect.left + window.innerHeight / 2);
+        toggleRotation();
+    }
+
+    function handleKeyboard(e) {
+        let key;
+        if (e.ctrlKey || e.metaKey) {
+            key = '↑';
+        } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'w' || e.key === '↑') {
+            return; // 已由上面的键盘监听器处理
+        } else if (e.key === 'ArrowLeft' || e.key === '←') key = '←';
+        else if (e.key === 'ArrowRight' || e.key === '→') key = '→';
+        if (!key) return;
+        e.preventDefault();
+        resizeBottom(currentSize + (key === '→' ? 5 : -5)); // 拖拽底座，缩放与旋转
+    }
+
+    function setScaleAndRotate() {
+        const scale = currentSize / 1.2; // 缩小为当前尺寸的 80%
+        toggleScale();
+        toggleRotation();
+    }
+
+    function setSize() {
+        resizeBottom(currentSize * 0.8); // 缩放底层，同时调整视角以适配场景大小
+    }
+
+    function addRaindrops(count) {
+        for (let i = 1; i <= count; i++) {
+            const btn = document.querySelector('.object-btn');
+            const div = document.createElement('div');
+            div.className = 'object';
+            div.textContent = `（雨，${i})`;
+            btn.appendChild(div);
+            setTimeout(() => addObject(btn.children[0]), 10);
+        }
+    }
+
+    function addRainEffect() {
+        const canvasRect = canvas.getBoundingClientRect();
+        const rainWidth = Math.min(currentSize, 100); // 约 100-200
+        const rainY = currentSize + 60; // 高于底座
+        const rainX = -currentSize / 2;
+        const rainRect = { left: rainX, top: rainY, width: rainWidth * 1.5, height: 30 };
+        context.beginPath(); context.restore();
+        const fillStyle = `rgba(30, 40, 60, 0.8) url('data:image/svg+xml;utf8,<svg xmlns=� xsi=\d+x;\sxnsx:\d+x' width="100" height="30" viewBox="0 0 100 40" fill='white'><rect width="100" height="30" fill='rgba(30,40,60,0.8)' rx="10" ry="20"/></svg>}`;
+        context.fillRect(rainX + (currentSize * 1.5), rainY - currentSize, rainWidth, 20);
+        context.shadowBlur = '4';
+    }
+
+    function updateRainfall() {
+        let deltaY = FPS * 0.05 + rain; // FPS 30
+        if (deltaY > 5) deltaY = 5;
+        raindrops.forEach(el => el.style.opacity = '0.7');
+    }
+
+    function addFlooringEffect() {
+        const floorStyle = 'rgba(30, 40, 60, 0.3)';
+        context.fillStyle = floorStyle;
+        canvasRect.width = currentSize * 2; // 底层可拖拽，但地板固定为当前尺寸
+        drawScene(); // 根据拖拽缩放重新绘出底层
+    }
+
+    function updateFlooring() {
+        const floorStyle = `rgba(30, 40, 60, 0.3)`;
+        context.fillStyle = floorStyle;
+        canvasRect.width = currentSize * 2; // 底层可拖拽，但地板固定为当前尺寸
+        drawScene();
+    }
+
+    function addTrafficEffect() {
+        const traffic = document.querySelector('[aria-live]');
+        if (traffic) traffic.textContent += '（交通）';
+        setTimeout(addTraffic, 100);
+    }
+
+    function addLightingEffect() {
+        context.createText2D({
+            x: -currentSize / 2,
+            y: currentSize + 50,
+            text: '灯箱',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSignEffect() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40, // 偏左
+            y: currentSize + 60,
+            text: '路牌/公告',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40, // 偏左
+            y: currentSize + 60,
+            text: '小型公告/海报',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40, // 偏左
+            y: currentSize + 60,
+            text: '空调外机',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40, // 偏左
+            y: currentSize + 60,
+            text: '便当/零食',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40, // 偏左
+            y: currentSize + 60,
+            text: '自行车',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40, // 偏左
+            y: currentSize + 60,
+            text: '雨伞',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40, // 偏左
+            y: currentSize + 60,
+            text: '垃圾桶',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40, // 偏左
+            y: currentSize + 60,
+            text: '电线杆',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40, // 偏左
+            y: currentSize + 60,
+            text: '道路',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40, // 偏左
+            y: currentSize + 60,
+            text: '反光斑马线',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40, // 偏左
+            y: currentSize + 60,
+            text: '小巷入口 (小巷)',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40, // 偏左
+            y: currentSize + 60,
+            text: '空调外机 (小型)',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40, // 偏左
+            y: currentSize + 60,
+            text: '便当/零食',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40, // 偏左
+            y: currentSize + 60,
+            text: '自行车',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    function addSign() {
+        const signCtxt = context.createText2D({
+            x: -currentSize / 2 + 40, // 偏左
+            y: currentSize + 60,
+            text: '雨伞',
+            lineStyle: false,
+            fontSize: 12
+        });
+        canvasRect.width = currentSize * 2;
+        drawScene();
+    }
+
+    const footer = document.createElement('div');
+    footer.className = 'model-layer';
+    footer.textContent = "雨夜便利店街角 - 三渲二 AI 微缩场景\n生成日期：2025-12-10 | 提示词：拖拽、旋转、缩放、底层正方形底座\n";
+
+    // 自动播放淡入淡出动画（可选，但能增强体验）
+    const style = document.styleSheets[0].nextSibling;
+    if (style) {
+        style.animate(
+            { opacity: 0.9, transition: 'opacity 1s, transform 0.5s' },
+            { duration: 4 }
+        ).then(() => {
+            setTimeout(() => clearStyle(), 150);
+        });
+    }
+</script>
+
+<font size=18 class="ui-bold">雨夜便利店街角</font>

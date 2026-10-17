@@ -1,0 +1,2072 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>雨夜便利店 - 街角微缩场景</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #0a0e1a;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+
+        #container {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            cursor: grab;
+        }
+
+        #container:active {
+            cursor: grabbing;
+        }
+
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #a8c0e0;
+            font-size: 14px;
+            letter-spacing: 2px;
+            z-index: 10;
+            transition: opacity 0.5s ease;
+        }
+
+        #hint {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: rgba(180, 200, 230, 0.6);
+            font-size: 12px;
+            letter-spacing: 1px;
+            z-index: 10;
+            pointer-events: none;
+            transition: opacity 1s ease;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+
+            .rain,
+            .drops,
+            .ripples {
+                animation: none !important;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div id="container">
+        <div id="loading">场景加载中...</div>
+        <div id="hint">拖拽旋转 · 滚轮缩放 · 右键平移</div>
+    </div>
+
+    <script>
+        // ——— 内联 Three.js r128 核心 ———
+        // 精简版 Three.js，包含场景、相机、渲染器、轨道控制器、基础几何体与材质
+        // 为保证单文件交付，核心库已压缩内联
+
+        const THREE = (function () {
+            const _Math = {
+                DEG2RAD: Math.PI / 180,
+                clamp: (v, min, max) => Math.max(min, Math.min(max, v)),
+                lerp: (a, b, t) => (1 - t) * a + t * b,
+                randFloat: (a, b) => a + Math.random() * (b - a)
+            };
+
+            class Vector3 {
+                constructor(x = 0, y = 0, z = 0) { this.x = x; this.y = y; this.z = z; }
+                set(x, y, z) { this.x = x; this.y = y; this.z = z; return this; }
+                copy(v) { this.x = v.x; this.y = v.y; this.z = v.z; return this; }
+                add(v) { this.x += v.x; this.y += v.y; this.z += v.z; return this; }
+                sub(v) { this.x -= v.x; this.y -= v.y; this.z -= v.z; return this; }
+                multiplyScalar(s) { this.x *= s; this.y *= s; this.z *= s; return this; }
+                divideScalar(s) { return this.multiplyScalar(1 / s); }
+                length() { return Math.sqrt(this.x * this.x + this.y * this.y + this.z * this.z); }
+                normalize() { return this.divideScalar(this.length() || 1); }
+                distanceTo(v) { return Math.sqrt((v.x - this.x) ** 2 + (v.y - this.y) ** 2 + (v.z - this.z) ** 2); }
+                clone() { return new Vector3(this.x, this.y, this.z); }
+            }
+
+            class Vector2 {
+                constructor(x = 0, y = 0) { this.x = x; this.y = y; }
+                set(x, y) { this.x = x; this.y = y; return this; }
+                clone() { return new Vector2(this.x, this.y); }
+            }
+
+            class Color {
+                constructor(r = 0, g = 0, b = 0) {
+                    if (typeof r === 'string') this.setHex(parseInt(r.replace('#', ''), 16));
+                    else if (arguments.length === 1) this.setHex(r);
+                    else this.setRGB(r, g, b);
+                }
+                setHex(hex) {
+                    this.r = ((hex >> 16) & 255) / 255;
+                    this.g = ((hex >> 8) & 255) / 255;
+                    this.b = (hex & 255) / 255;
+                    return this;
+                }
+                setRGB(r, g, b) { this.r = r; this.g = g; this.b = b; return this; }
+                getHex() { return (this.r * 255) << 16 | (this.g * 255) << 8 | (this.b * 255); }
+                multiplyScalar(s) { this.r *= s; this.g *= s; this.b *= s; return this; }
+                clone() { return new Color(this.r, this.g, this.b); }
+            }
+
+            class Matrix4 {
+                constructor() { this.elements = new Float32Array(16); this.identity(); }
+                identity() {
+                    const e = this.elements;
+                    e[0] = 1; e[1] = 0; e[2] = 0; e[3] = 0;
+                    e[4] = 0; e[5] = 1; e[6] = 0; e[7] = 0;
+                    e[8] = 0; e[9] = 0; e[10] = 1; e[11] = 0;
+                    e[12] = 0; e[13] = 0; e[14] = 0; e[15] = 1;
+                    return this;
+                }
+                makeTranslation(x, y, z) {
+                    const e = this.elements;
+                    e[0] = 1; e[1] = 0; e[2] = 0; e[3] = 0;
+                    e[4] = 0; e[5] = 1; e[6] = 0; e[7] = 0;
+                    e[8] = 0; e[9] = 0; e[10] = 1; e[11] = 0;
+                    e[12] = x; e[13] = y; e[14] = z; e[15] = 1;
+                    return this;
+                }
+                makeRotationY(angle) {
+                    const e = this.elements, c = Math.cos(angle), s = Math.sin(angle);
+                    e[0] = c; e[1] = 0; e[2] = -s; e[3] = 0;
+                    e[4] = 0; e[5] = 1; e[6] = 0; e[7] = 0;
+                    e[8] = s; e[9] = 0; e[10] = c; e[11] = 0;
+                    e[12] = 0; e[13] = 0; e[14] = 0; e[15] = 1;
+                    return this;
+                }
+                makeScale(x, y, z) {
+                    const e = this.elements;
+                    e[0] = x; e[1] = 0; e[2] = 0; e[3] = 0;
+                    e[4] = 0; e[5] = y; e[6] = 0; e[7] = 0;
+                    e[8] = 0; e[9] = 0; e[10] = z; e[11] = 0;
+                    e[12] = 0; e[13] = 0; e[14] = 0; e[15] = 1;
+                    return this;
+                }
+                multiply(m) {
+                    const a = this.elements, b = m.elements, result = new Matrix4();
+                    const r = result.elements;
+                    for (let i = 0; i < 4; i++) {
+                        for (let j = 0; j < 4; j++) {
+                            r[j * 4 + i] = a[i] * b[j * 4] + a[4 + i] * b[j * 4 + 1] + a[8 + i] * b[j * 4 + 2] + a[12 + i] * b[j * 4 + 3];
+                        }
+                    }
+                    this.elements = r;
+                    return this;
+                }
+                compose(position, quaternion, scale) {
+                    this.makeRotationY(quaternion.y); // simplified
+                    this.elements[12] = position.x;
+                    this.elements[13] = position.y;
+                    this.elements[14] = position.z;
+                    this.scale(scale);
+                    return this;
+                }
+                scale(v) {
+                    const e = this.elements;
+                    e[0] *= v.x; e[1] *= v.x; e[2] *= v.x;
+                    e[4] *= v.y; e[5] *= v.y; e[6] *= v.y;
+                    e[8] *= v.z; e[9] *= v.z; e[10] *= v.z;
+                    return this;
+                }
+                clone() {
+                    const m = new Matrix4();
+                    m.elements.set(this.elements);
+                    return m;
+                }
+            }
+
+            // ——— 几何体 ———
+            class BufferGeometry {
+                constructor() { this.attributes = {}; this.index = null; }
+                setAttribute(name, buffer) { this.attributes[name] = buffer; }
+                setIndex(indices) { this.index = new Uint16Array(indices); }
+                computeVertexNormals() {
+                    // simplified normal computation
+                    if (!this.index) return;
+                    const pos = this.attributes.position.array;
+                    const idx = this.index;
+                    const normals = new Float32Array(pos.length);
+                    for (let i = 0; i < idx.length; i += 3) {
+                        const i0 = idx[i] * 3, i1 = idx[i + 1] * 3, i2 = idx[i + 2] * 3;
+                        const ax = pos[i1] - pos[i0], ay = pos[i1 + 1] - pos[i0 + 1], az = pos[i1 + 2] - pos[i0 + 2];
+                        const bx = pos[i2] - pos[i0], by = pos[i2 + 1] - pos[i0 + 1], bz = pos[i2 + 2] - pos[i0 + 2];
+                        const nx = ay * bz - az * by, ny = az * bx - ax * bz, nz = ax * by - ay * bx;
+                        const len = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+                        for (let j of [i0, i1, i2]) {
+                            normals[j] += nx / len;
+                            normals[j + 1] += ny / len;
+                            normals[j + 2] += nz / len;
+                        }
+                    }
+                    this.attributes.normal = { array: normals, itemSize: 3 };
+                }
+            }
+
+            class BoxGeometry extends BufferGeometry {
+                constructor(w = 1, h = 1, d = 1) {
+                    super();
+                    const hw = w / 2, hh = h / 2, hd = d / 2;
+                    const vertices = new Float32Array([
+                        // front
+                        -hw, -hh, hd, hw, -hh, hd, hw, hh, hd, -hw, hh, hd,
+                        // back
+                        hw, -hh, -hd, -hw, -hh, -hd, -hw, hh, -hd, hw, hh, -hd,
+                        // top
+                        -hw, hh, hd, hw, hh, hd, hw, hh, -hd, -hw, hh, -hd,
+                        // bottom
+                        -hw, -hh, -hd, hw, -hh, -hd, hw, -hh, hd, -hw, -hh, hd,
+                        // right
+                        hw, -hh, hd, hw, -hh, -hd, hw, hh, -hd, hw, hh, hd,
+                        // left
+                        -hw, -hh, -hd, -hw, -hh, hd, -hw, hh, hd, -hw, hh, -hd
+                    ]);
+                    const uvs = new Float32Array(24 * 2);
+                    for (let i = 0; i < 6; i++) {
+                        uvs[i * 8 + 0] = 0; uvs[i * 8 + 1] = 0;
+                        uvs[i * 8 + 2] = 1; uvs[i * 8 + 3] = 0;
+                        uvs[i * 8 + 4] = 1; uvs[i * 8 + 5] = 1;
+                        uvs[i * 8 + 6] = 0; uvs[i * 8 + 7] = 1;
+                    }
+                    const indices = [];
+                    for (let i = 0; i < 6; i++) {
+                        const o = i * 4;
+                        indices.push(o, o + 1, o + 2, o, o + 2, o + 3);
+                    }
+                    this.setAttribute('position', { array: vertices, itemSize: 3 });
+                    this.setAttribute('uv', { array: uvs, itemSize: 2 });
+                    this.setIndex(indices);
+                    this.computeVertexNormals();
+                }
+            }
+
+            class PlaneGeometry extends BufferGeometry {
+                constructor(w = 1, h = 1, segW = 1, segH = 1) {
+                    super();
+                    const hw = w / 2, hh = h / 2;
+                    const vertices = [];
+                    const uvs = [];
+                    for (let y = 0; y <= segH; y++) {
+                        for (let x = 0; x <= segW; x++) {
+                            vertices.push(
+                                (x / segW) * w - hw,
+                                0,
+                                (y / segH) * h - hh
+                            );
+                            uvs.push(x / segW, y / segH);
+                        }
+                    }
+                    const indices = [];
+                    for (let y = 0; y < segH; y++) {
+                        for (let x = 0; x < segW; x++) {
+                            const a = y * (segW + 1) + x;
+                            const b = y * (segW + 1) + x + 1;
+                            const c = (y + 1) * (segW + 1) + x;
+                            const d = (y + 1) * (segW + 1) + x + 1;
+                            indices.push(a, b, d, a, d, c);
+                        }
+                    }
+                    this.setAttribute('position', { array: new Float32Array(vertices), itemSize: 3 });
+                    this.setAttribute('uv', { array: new Float32Array(uvs), itemSize: 2 });
+                    this.setIndex(indices);
+                    this.computeVertexNormals();
+                }
+            }
+
+            class CylinderGeometry extends BufferGeometry {
+                constructor(rTop = 0.5, rBottom = 0.5, h = 1, seg = 16) {
+                    super();
+                    const hh = h / 2;
+                    const vertices = [];
+                    const uvs = [];
+                    // side
+                    for (let i = 0; i <= seg; i++) {
+                        const angle = (i / seg) * Math.PI * 2;
+                        const cos = Math.cos(angle), sin = Math.sin(angle);
+                        vertices.push(rTop * cos, hh, rTop * sin);
+                        vertices.push(rBottom * cos, -hh, rBottom * sin);
+                        uvs.push(i / seg, 0, i / seg, 1);
+                    }
+                    const indices = [];
+                    for (let i = 0; i < seg; i++) {
+                        const a = i * 2, b = i * 2 + 1, c = i * 2 + 2, d = i * 2 + 3;
+                        indices.push(a, b, d, a, d, c);
+                    }
+                    // top cap
+                    const topCenter = vertices.length / 3;
+                    vertices.push(0, hh, 0);
+                    uvs.push(0.5, 0.5);
+                    for (let i = 0; i <= seg; i++) {
+                        const angle = (i / seg) * Math.PI * 2;
+                        vertices.push(rTop * Math.cos(angle), hh, rTop * Math.sin(angle));
+                        uvs.push(0.5 + 0.5 * Math.cos(angle), 0.5 + 0.5 * Math.sin(angle));
+                    }
+                    for (let i = 0; i < seg; i++) {
+                        indices.push(topCenter, topCenter + 1 + i, topCenter + 2 + i);
+                    }
+                    // bottom cap
+                    const bottomCenter = vertices.length / 3;
+                    vertices.push(0, -hh, 0);
+                    uvs.push(0.5, 0.5);
+                    for (let i = 0; i <= seg; i++) {
+                        const angle = (i / seg) * Math.PI * 2;
+                        vertices.push(rBottom * Math.cos(angle), -hh, rBottom * Math.sin(angle));
+                        uvs.push(0.5 + 0.5 * Math.cos(angle), 0.5 + 0.5 * Math.sin(angle));
+                    }
+                    for (let i = 0; i < seg; i++) {
+                        indices.push(bottomCenter, bottomCenter + 2 + i, bottomCenter + 1 + i);
+                    }
+                    this.setAttribute('position', { array: new Float32Array(vertices), itemSize: 3 });
+                    this.setAttribute('uv', { array: new Float32Array(uvs), itemSize: 2 });
+                    this.setIndex(indices);
+                    this.computeVertexNormals();
+                }
+            }
+
+            // ——— 材质 ———
+            class ShaderMaterial {
+                constructor(params = {}) {
+                    this.vertexShader = params.vertexShader || '';
+                    this.fragmentShader = params.fragmentShader || '';
+                    this.uniforms = {};
+                    if (params.uniforms) {
+                        for (let k in params.uniforms) {
+                            this.uniforms[k] = { value: params.uniforms[k] };
+                        }
+                    }
+                    this.transparent = params.transparent || false;
+                    this.side = params.side || 2; // 2=DoubleSide
+                    this.color = params.color ? new Color(params.color) : new Color(0xffffff);
+                }
+            }
+
+            class MeshBasicMaterial {
+                constructor(params = {}) {
+                    this.color = new Color(params.color || 0xffffff);
+                    this.transparent = params.transparent || false;
+                    this.opacity = params.opacity !== undefined ? params.opacity : 1;
+                    this.side = params.side || 2;
+                    this.map = params.map || null;
+                    this.wireframe = params.wireframe || false;
+                }
+            }
+
+            class MeshLambertMaterial {
+                constructor(params = {}) {
+                    this.color = new Color(params.color || 0xffffff);
+                    this.emissive = new Color(params.emissive || 0x000000);
+                    this.transparent = params.transparent || false;
+                    this.opacity = params.opacity !== undefined ? params.opacity : 1;
+                    this.side = params.side || 2;
+                    this.map = params.map || null;
+                }
+            }
+
+            // ——— 纹理 ———
+            class CanvasTexture {
+                constructor(canvas) {
+                    this.image = canvas;
+                    this.needsUpdate = true;
+                    this._glTexture = null;
+                }
+            }
+
+            // ——— 对象 ———
+            class Object3D {
+                constructor() {
+                    this.position = new Vector3();
+                    this.rotation = new Vector3();
+                    this.scale = new Vector3(1, 1, 1);
+                    this.children = [];
+                    this.parent = null;
+                    this.visible = true;
+                    this.matrix = new Matrix4();
+                    this.matrixWorld = new Matrix4();
+                    this.userData = {};
+                }
+                add(obj) {
+                    if (obj.parent) obj.parent.remove(obj);
+                    obj.parent = this;
+                    this.children.push(obj);
+                }
+                remove(obj) {
+                    const i = this.children.indexOf(obj);
+                    if (i >= 0) { this.children.splice(i, 1); obj.parent = null; }
+                }
+                updateMatrix() {
+                    this.matrix.makeTranslation(this.position.x, this.position.y, this.position.z);
+                    const rotMat = new Matrix4().makeRotationY(this.rotation.y);
+                    this.matrix.multiply(rotMat);
+                    this.matrix.scale(this.scale);
+                }
+                updateMatrixWorld() {
+                    this.updateMatrix();
+                    if (this.parent) {
+                        this.matrixWorld = this.parent.matrixWorld.clone().multiply(this.matrix);
+                    } else {
+                        this.matrixWorld = this.matrix.clone();
+                    }
+                    for (const child of this.children) {
+                        child.updateMatrixWorld();
+                    }
+                }
+                traverse(fn) {
+                    fn(this);
+                    for (const child of this.children) child.traverse(fn);
+                }
+            }
+
+            class Mesh extends Object3D {
+                constructor(geometry, material) {
+                    super();
+                    this.geometry = geometry;
+                    this.material = material;
+                }
+            }
+
+            class Group extends Object3D {
+                constructor() { super(); }
+            }
+
+            // ——— 灯光 ———
+            class Light extends Object3D {
+                constructor(color = 0xffffff, intensity = 1) {
+                    super();
+                    this.color = new Color(color);
+                    this.intensity = intensity;
+                }
+            }
+
+            class AmbientLight extends Light {
+                constructor(color, intensity) { super(color, intensity); }
+            }
+
+            class PointLight extends Light {
+                constructor(color, intensity, distance = 0) {
+                    super(color, intensity);
+                    this.distance = distance;
+                }
+            }
+
+            // ——— 相机 ———
+            class PerspectiveCamera extends Object3D {
+                constructor(fov = 75, aspect = 1, near = 0.1, far = 1000) {
+                    super();
+                    this.fov = fov;
+                    this.aspect = aspect;
+                    this.near = near;
+                    this.far = far;
+                    this.projectionMatrix = new Matrix4();
+                    this.updateProjectionMatrix();
+                }
+                updateProjectionMatrix() {
+                    const f = 1 / Math.tan((this.fov * _Math.DEG2RAD) / 2);
+                    const nf = 1 / (this.near - this.far);
+                    const e = this.projectionMatrix.elements;
+                    e[0] = f / this.aspect; e[1] = 0; e[2] = 0; e[3] = 0;
+                    e[4] = 0; e[5] = f; e[6] = 0; e[7] = 0;
+                    e[8] = 0; e[9] = 0; e[10] = (this.far + this.near) * nf; e[11] = -1;
+                    e[12] = 0; e[13] = 0; e[14] = 2 * this.far * this.near * nf; e[15] = 0;
+                }
+            }
+
+            // ——— 场景 ———
+            class Scene extends Object3D {
+                constructor() {
+                    super();
+                    this.background = new Color(0x000000);
+                    this.fog = null;
+                }
+            }
+
+            class Fog {
+                constructor(color, near, far) {
+                    this.color = new Color(color);
+                    this.near = near;
+                    this.far = far;
+                }
+            }
+
+            // ——— WebGL渲染器 ———
+            class WebGLRenderer {
+                constructor(params = {}) {
+                    this.canvas = params.canvas || document.createElement('canvas');
+                    this.gl = this.canvas.getContext('webgl', {
+                        antialias: true,
+                        alpha: false,
+                        preserveDrawingBuffer: false
+                    });
+                    if (!this.gl) throw new Error('WebGL not supported');
+
+                    this.setSize(params.width || 300, params.height || 150);
+                    this.setClearColor(params.clearColor || 0x000000, 1);
+
+                    this._programs = new Map();
+                    this._textures = new Map();
+                    this._initGL();
+                }
+
+                _initGL() {
+                    const gl = this.gl;
+                    gl.enable(gl.DEPTH_TEST);
+                    gl.enable(gl.CULL_FACE);
+                    gl.cullFace(gl.BACK);
+                }
+
+                setSize(w, h) {
+                    this.canvas.width = w * window.devicePixelRatio;
+                    this.canvas.height = h * window.devicePixelRatio;
+                    this.canvas.style.width = w + 'px';
+                    this.canvas.style.height = h + 'px';
+                    this._width = w;
+                    this._height = h;
+                }
+
+                setClearColor(hex, alpha = 1) {
+                    const c = new Color(hex);
+                    this.gl.clearColor(c.r, c.g, c.b, alpha);
+                }
+
+                _getProgram(material) {
+                    const key = material instanceof ShaderMaterial ? 'shader_' + material.vertexShader.length :
+                        material instanceof MeshBasicMaterial ? 'basic' : 'lambert';
+
+                    if (this._programs.has(key)) return this._programs.get(key);
+
+                    const gl = this.gl;
+                    let vs, fs;
+
+                    if (material instanceof ShaderMaterial) {
+                        vs = material.vertexShader;
+                        fs = material.fragmentShader;
+                    } else if (material instanceof MeshBasicMaterial) {
+                        vs = `
+                    attribute vec3 position;
+                    attribute vec2 uv;
+                    uniform mat4 modelViewMatrix;
+                    uniform mat4 projectionMatrix;
+                    varying vec2 vUv;
+                    void main(){
+                        vUv = uv;
+                        gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
+                    }
+                `;
+                        fs = `
+                    precision mediump float;
+                    uniform vec3 color;
+                    uniform float opacity;
+                    uniform sampler2D map;
+                    uniform int useMap;
+                    varying vec2 vUv;
+                    void main(){
+                        vec4 c = vec4(color, opacity);
+                        if(useMap == 1) c *= texture2D(map, vUv);
+                        gl_FragColor = c;
+                    }
+                `;
+                    } else {
+                        // Lambert with toon shading (三渲二风格)
+                        vs = `
+                    attribute vec3 position;
+                    attribute vec3 normal;
+                    attribute vec2 uv;
+                    uniform mat4 modelViewMatrix;
+                    uniform mat4 projectionMatrix;
+                    uniform mat3 normalMatrix;
+                    varying vec3 vNormal;
+                    varying vec2 vUv;
+                    varying vec3 vViewPos;
+                    void main(){
+                        vNormal = normalize(normalMatrix * normal);
+                        vUv = uv;
+                        vec4 mvPos = modelViewMatrix * vec4(position,1.0);
+                        vViewPos = -mvPos.xyz;
+                        gl_Position = projectionMatrix * mvPos;
+                    }
+                `;
+                        fs = `
+                    precision mediump float;
+                    uniform vec3 color;
+                    uniform vec3 emissive;
+                    uniform vec3 lightDir;
+                    uniform vec3 lightColor;
+                    uniform vec3 ambientColor;
+                    uniform float ambientIntensity;
+                    uniform float opacity;
+                    uniform sampler2D map;
+                    uniform int useMap;
+                    uniform float toonSteps;
+                    varying vec3 vNormal;
+                    varying vec2 vUv;
+                    varying vec3 vViewPos;
+
+                    void main(){
+                        vec3 N = normalize(vNormal);
+                        vec3 L = normalize(lightDir);
+                        float diff = max(dot(N, L), 0.0);
+                        
+                        // Toon shading (cel shading)
+                        float toon = floor(diff * toonSteps) / toonSteps;
+                        toon = max(toon, 0.3);
+                        
+                        vec3 baseColor = color;
+                        if(useMap == 1) baseColor *= texture2D(map, vUv).rgb;
+                        
+                        vec3 finalColor = baseColor * (ambientColor * ambientIntensity + lightColor * toon);
+                        finalColor += emissive;
+                        
+                        // Rim light
+                        vec3 V = normalize(vViewPos);
+                        float rim = 1.0 - max(dot(N, V), 0.0);
+                        rim = smoothstep(0.6, 1.0, rim) * 0.15;
+                        finalColor += lightColor * rim;
+                        
+                        gl_FragColor = vec4(finalColor, opacity);
+                    }
+                `;
+                    }
+
+                    const vShader = gl.createShader(gl.VERTEX_SHADER);
+                    gl.shaderSource(vShader, vs);
+                    gl.compileShader(vShader);
+
+                    const fShader = gl.createShader(gl.FRAGMENT_SHADER);
+                    gl.shaderSource(fShader, fs);
+                    gl.compileShader(fShader);
+
+                    const program = gl.createProgram();
+                    gl.attachShader(program, vShader);
+                    gl.attachShader(program, fShader);
+                    gl.linkProgram(program);
+
+                    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+                        console.error('Program link error:', gl.getProgramInfoLog(program));
+                    }
+
+                    const progInfo = {
+                        program,
+                        attribs: {
+                            position: gl.getAttribLocation(program, 'position'),
+                            normal: gl.getAttribLocation(program, 'normal'),
+                            uv: gl.getAttribLocation(program, 'uv')
+                        },
+                        uniforms: {
+                            projectionMatrix: gl.getUniformLocation(program, 'projectionMatrix'),
+                            modelViewMatrix: gl.getUniformLocation(program, 'modelViewMatrix'),
+                            normalMatrix: gl.getUniformLocation(program, 'normalMatrix'),
+                            color: gl.getUniformLocation(program, 'color'),
+                            emissive: gl.getUniformLocation(program, 'emissive'),
+                            opacity: gl.getUniformLocation(program, 'opacity'),
+                            lightDir: gl.getUniformLocation(program, 'lightDir'),
+                            lightColor: gl.getUniformLocation(program, 'lightColor'),
+                            ambientColor: gl.getUniformLocation(program, 'ambientColor'),
+                            ambientIntensity: gl.getUniformLocation(program, 'ambientIntensity'),
+                            toonSteps: gl.getUniformLocation(program, 'toonSteps'),
+                            map: gl.getUniformLocation(program, 'map'),
+                            useMap: gl.getUniformLocation(program, 'useMap')
+                        }
+                    };
+
+                    // ShaderMaterial uniforms
+                    if (material instanceof ShaderMaterial) {
+                        progInfo.customUniforms = {};
+                        for (const name in material.uniforms) {
+                            progInfo.customUniforms[name] = gl.getUniformLocation(program, name);
+                        }
+                    }
+
+                    this._programs.set(key, progInfo);
+                    return progInfo;
+                }
+
+                _getTexture(texture) {
+                    if (this._textures.has(texture)) return this._textures.get(texture);
+
+                    const gl = this.gl;
+                    const tex = gl.createTexture();
+                    gl.bindTexture(gl.TEXTURE_2D, tex);
+                    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, texture.image);
+                    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+                    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+                    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+                    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+                    this._textures.set(texture, tex);
+                    return tex;
+                }
+
+                _setupBuffers(mesh) {
+                    const geo = mesh.geometry;
+                    if (!geo._buffers) {
+                        const gl = this.gl;
+                        geo._buffers = {
+                            position: gl.createBuffer(),
+                            normal: geo.attributes.normal ? gl.createBuffer() : null,
+                            uv: geo.attributes.uv ? gl.createBuffer() : null,
+                            index: gl.createBuffer()
+                        };
+
+                        gl.bindBuffer(gl.ARRAY_BUFFER, geo._buffers.position);
+                        gl.bufferData(gl.ARRAY_BUFFER, geo.attributes.position.array, gl.STATIC_DRAW);
+
+                        if (geo.attributes.normal) {
+                            gl.bindBuffer(gl.ARRAY_BUFFER, geo._buffers.normal);
+                            gl.bufferData(gl.ARRAY_BUFFER, geo.attributes.normal.array, gl.STATIC_DRAW);
+                        }
+
+                        if (geo.attributes.uv) {
+                            gl.bindBuffer(gl.ARRAY_BUFFER, geo._buffers.uv);
+                            gl.bufferData(gl.ARRAY_BUFFER, geo.attributes.uv.array, gl.STATIC_DRAW);
+                        }
+
+                        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, geo._buffers.index);
+                        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, geo.index, gl.STATIC_DRAW);
+                    }
+                    return geo._buffers;
+                }
+
+                render(scene, camera) {
+                    const gl = this.gl;
+                    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+                    gl.depthMask(true);
+                    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+                    camera.updateMatrixWorld();
+                    scene.updateMatrixWorld();
+
+                    // Collect lights
+                    let ambientLight = { color: new Color(0x404060), intensity: 0.4 };
+                    let mainLight = { color: new Color(0xffffff), direction: new Vector3(0.5, 1, 0.8) };
+
+                    scene.traverse(obj => {
+                        if (obj instanceof AmbientLight) {
+                            ambientLight = { color: obj.color.clone(), intensity: obj.intensity };
+                        }
+                    });
+
+                    const projMat = camera.projectionMatrix.elements;
+                    const target = camera.target || new Vector3();
+                    const z = camera.position.clone().sub(target).normalize();
+                    const x = new Vector3(z.z, 0, -z.x).normalize();
+                    const y = new Vector3(z.y * x.z - z.z * x.y, z.z * x.x - z.x * x.z, z.x * x.y - z.y * x.x);
+                    const viewMat = new Matrix4();
+                    viewMat.elements.set([
+                        x.x, y.x, z.x, 0,
+                        x.y, y.y, z.y, 0,
+                        x.z, y.z, z.z, 0,
+                        -(x.x * camera.position.x + x.y * camera.position.y + x.z * camera.position.z),
+                        -(y.x * camera.position.x + y.y * camera.position.y + y.z * camera.position.z),
+                        -(z.x * camera.position.x + z.y * camera.position.y + z.z * camera.position.z), 1
+                    ]);
+
+                    scene.traverse(obj => {
+                        if (!(obj instanceof Mesh) || !obj.visible) return;
+
+                        const material = obj.material;
+                        const progInfo = this._getProgram(material);
+
+                        gl.useProgram(progInfo.program);
+
+                        // ModelView matrix
+                        const mvMat = new Matrix4();
+                        // Simplified: camera world inverse * obj world
+                        mvMat.elements.set(viewMat.clone().multiply(obj.matrixWorld).elements);
+
+                        // Normal matrix (simplified)
+                        const normalMat = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+
+                        gl.uniformMatrix4fv(progInfo.uniforms.projectionMatrix, false, projMat);
+                        gl.uniformMatrix4fv(progInfo.uniforms.modelViewMatrix, false, mvMat.elements);
+                        if (progInfo.uniforms.normalMatrix) {
+                            gl.uniformMatrix3fv(progInfo.uniforms.normalMatrix, false, normalMat);
+                        }
+
+                        // Common uniforms
+                        if (progInfo.uniforms.color) {
+                            gl.uniform3f(progInfo.uniforms.color, material.color.r, material.color.g, material.color.b);
+                        }
+                        if (progInfo.uniforms.emissive) {
+                            gl.uniform3f(progInfo.uniforms.emissive, material.emissive.r, material.emissive.g, material.emissive.b);
+                        }
+                        if (progInfo.uniforms.opacity) {
+                            gl.uniform1f(progInfo.uniforms.opacity, material.opacity !== undefined ? material.opacity : 1);
+                        }
+                        if (progInfo.uniforms.lightDir) {
+                            gl.uniform3f(progInfo.uniforms.lightDir, mainLight.direction.x, mainLight.direction.y, mainLight.direction.z);
+                        }
+                        if (progInfo.uniforms.lightColor) {
+                            gl.uniform3f(progInfo.uniforms.lightColor, mainLight.color.r, mainLight.color.g, mainLight.color.b);
+                        }
+                        if (progInfo.uniforms.ambientColor) {
+                            gl.uniform3f(progInfo.uniforms.ambientColor, ambientLight.color.r, ambientLight.color.g, ambientLight.color.b);
+                        }
+                        if (progInfo.uniforms.ambientIntensity) {
+                            gl.uniform1f(progInfo.uniforms.ambientIntensity, ambientLight.intensity);
+                        }
+                        if (progInfo.uniforms.toonSteps) {
+                            gl.uniform1f(progInfo.uniforms.toonSteps, 3.0);
+                        }
+
+                        // Texture
+                        if (material.map && progInfo.uniforms.map) {
+                            gl.activeTexture(gl.TEXTURE0);
+                            gl.bindTexture(gl.TEXTURE_2D, this._getTexture(material.map));
+                            gl.uniform1i(progInfo.uniforms.map, 0);
+                            gl.uniform1i(progInfo.uniforms.useMap, 1);
+                        } else if (progInfo.uniforms.useMap) {
+                            gl.uniform1i(progInfo.uniforms.useMap, 0);
+                        }
+
+                        // Custom uniforms for ShaderMaterial
+                        if (material instanceof ShaderMaterial && progInfo.customUniforms) {
+                            for (const name in material.uniforms) {
+                                const loc = progInfo.customUniforms[name];
+                                const val = material.uniforms[name].value;
+                                if (loc === null) continue;
+                                if (typeof val === 'number') {
+                                    gl.uniform1f(loc, val);
+                                } else if (val instanceof Color) {
+                                    gl.uniform3f(loc, val.r, val.g, val.b);
+                                } else if (val instanceof Vector2) {
+                                    gl.uniform2f(loc, val.x, val.y);
+                                }
+                            }
+                        }
+
+                        // Transparency
+                        if (material.transparent || (material.opacity !== undefined && material.opacity < 1)) {
+                            gl.enable(gl.BLEND);
+                            gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+                            gl.depthMask(false);
+                        } else {
+                            gl.disable(gl.BLEND);
+                            gl.depthMask(true);
+                        }
+
+                        // Side
+                        if (material.side === 2) { // DoubleSide
+                            gl.disable(gl.CULL_FACE);
+                        } else {
+                            gl.enable(gl.CULL_FACE);
+                        }
+
+                        // Wireframe
+                        if (material.wireframe) {
+                            // not implemented in simplified version
+                        }
+
+                        // Bind buffers and draw
+                        const buffers = this._setupBuffers(obj);
+
+                        gl.bindBuffer(gl.ARRAY_BUFFER, buffers.position);
+                        gl.enableVertexAttribArray(progInfo.attribs.position);
+                        gl.vertexAttribPointer(progInfo.attribs.position, 3, gl.FLOAT, false, 0, 0);
+
+                        if (progInfo.attribs.normal >= 0 && buffers.normal) {
+                            gl.bindBuffer(gl.ARRAY_BUFFER, buffers.normal);
+                            gl.enableVertexAttribArray(progInfo.attribs.normal);
+                            gl.vertexAttribPointer(progInfo.attribs.normal, 3, gl.FLOAT, false, 0, 0);
+                        }
+
+                        if (progInfo.attribs.uv >= 0 && buffers.uv) {
+                            gl.bindBuffer(gl.ARRAY_BUFFER, buffers.uv);
+                            gl.enableVertexAttribArray(progInfo.attribs.uv);
+                            gl.vertexAttribPointer(progInfo.attribs.uv, 2, gl.FLOAT, false, 0, 0);
+                        }
+
+                        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffers.index);
+                        gl.drawElements(gl.TRIANGLES, obj.geometry.index.length, gl.UNSIGNED_SHORT, 0);
+                    });
+                }
+            }
+
+            // ——— 轨道控制器 ———
+            class OrbitControls {
+                constructor(camera, domElement) {
+                    this.camera = camera;
+                    this.dom = domElement;
+
+                    this.target = new Vector3(0, 0, 0);
+                    this.minDistance = 2;
+                    this.maxDistance = 20;
+                    this.minPolarAngle = 0.1;
+                    this.maxPolarAngle = Math.PI / 2 - 0.1;
+
+                    this.enableDamping = true;
+                    this.dampingFactor = 0.08;
+
+                    this._spherical = { theta: Math.PI * 0.25, phi: Math.PI * 0.4, radius: 8 };
+                    this._targetSpherical = { theta: Math.PI * 0.25, phi: Math.PI * 0.4, radius: 8 };
+                    this._targetOffset = new Vector3();
+
+                    this._isDragging = false;
+                    this._isPanning = false;
+                    this._lastX = 0;
+                    this._lastY = 0;
+
+                    this._bindEvents();
+                    this._updateCamera();
+                }
+
+                _bindEvents() {
+                    const dom = this.dom;
+
+                    dom.addEventListener('mousedown', (e) => {
+                        if (e.button === 0) {
+                            this._isDragging = true;
+                        } else if (e.button === 2) {
+                            this._isPanning = true;
+                        }
+                        this._lastX = e.clientX;
+                        this._lastY = e.clientY;
+                    });
+
+                    window.addEventListener('mousemove', (e) => {
+                        if (this._isDragging) {
+                            const dx = e.clientX - this._lastX;
+                            const dy = e.clientY - this._lastY;
+                            this._targetSpherical.theta -= dx * 0.005;
+                            this._targetSpherical.phi -= dy * 0.005;
+                            this._targetSpherical.phi = _Math.clamp(this._targetSpherical.phi, this.minPolarAngle, this.maxPolarAngle);
+                            this._lastX = e.clientX;
+                            this._lastY = e.clientY;
+                        }
+                        if (this._isPanning) {
+                            const dx = e.clientX - this._lastX;
+                            const dy = e.clientY - this._lastY;
+                            const panSpeed = this._spherical.radius * 0.001;
+                            this._targetOffset.x -= dx * panSpeed * Math.cos(this._spherical.theta);
+                            this._targetOffset.z -= dx * panSpeed * Math.sin(this._spherical.theta);
+                            this._targetOffset.y += dy * panSpeed;
+                            this._lastX = e.clientX;
+                            this._lastY = e.clientY;
+                        }
+                    });
+
+                    window.addEventListener('mouseup', () => {
+                        this._isDragging = false;
+                        this._isPanning = false;
+                    });
+
+                    dom.addEventListener('wheel', (e) => {
+                        e.preventDefault();
+                        const delta = e.deltaY > 0 ? 1.1 : 0.9;
+                        this._targetSpherical.radius *= delta;
+                        this._targetSpherical.radius = _Math.clamp(this._targetSpherical.radius, this.minDistance, this.maxDistance);
+                    }, { passive: false });
+
+                    dom.addEventListener('contextmenu', e => e.preventDefault());
+
+                    // Touch
+                    let touchStartDist = 0;
+                    dom.addEventListener('touchstart', (e) => {
+                        if (e.touches.length === 1) {
+                            this._isDragging = true;
+                            this._lastX = e.touches[0].clientX;
+                            this._lastY = e.touches[0].clientY;
+                        } else if (e.touches.length === 2) {
+                            const dx = e.touches[0].clientX - e.touches[1].clientX;
+                            const dy = e.touches[0].clientY - e.touches[1].clientY;
+                            touchStartDist = Math.sqrt(dx * dx + dy * dy);
+                        }
+                    });
+
+                    dom.addEventListener('touchmove', (e) => {
+                        e.preventDefault();
+                        if (e.touches.length === 1 && this._isDragging) {
+                            const dx = e.touches[0].clientX - this._lastX;
+                            const dy = e.touches[0].clientY - this._lastY;
+                            this._targetSpherical.theta -= dx * 0.005;
+                            this._targetSpherical.phi -= dy * 0.005;
+                            this._targetSpherical.phi = _Math.clamp(this._targetSpherical.phi, this.minPolarAngle, this.maxPolarAngle);
+                            this._lastX = e.touches[0].clientX;
+                            this._lastY = e.touches[0].clientY;
+                        } else if (e.touches.length === 2) {
+                            const dx = e.touches[0].clientX - e.touches[1].clientX;
+                            const dy = e.touches[0].clientY - e.touches[1].clientY;
+                            const dist = Math.sqrt(dx * dx + dy * dy);
+                            const delta = touchStartDist / dist;
+                            this._targetSpherical.radius *= delta;
+                            this._targetSpherical.radius = _Math.clamp(this._targetSpherical.radius, this.minDistance, this.maxDistance);
+                            touchStartDist = dist;
+                        }
+                    }, { passive: false });
+
+                    dom.addEventListener('touchend', () => {
+                        this._isDragging = false;
+                    });
+
+                    // Keyboard
+                    window.addEventListener('keydown', (e) => {
+                        const rotSpeed = 0.08;
+                        const zoomSpeed = 0.9;
+                        switch (e.key) {
+                            case 'ArrowLeft': this._targetSpherical.theta -= rotSpeed; break;
+                            case 'ArrowRight': this._targetSpherical.theta += rotSpeed; break;
+                            case 'ArrowUp': this._targetSpherical.phi -= rotSpeed; break;
+                            case 'ArrowDown': this._targetSpherical.phi += rotSpeed; break;
+                            case '+': case '=': this._targetSpherical.radius *= zoomSpeed; break;
+                            case '-': this._targetSpherical.radius /= zoomSpeed; break;
+                        }
+                        this._targetSpherical.phi = _Math.clamp(this._targetSpherical.phi, this.minPolarAngle, this.maxPolarAngle);
+                        this._targetSpherical.radius = _Math.clamp(this._targetSpherical.radius, this.minDistance, this.maxDistance);
+                    });
+                }
+
+                update() {
+                    if (this.enableDamping) {
+                        this._spherical.theta = _Math.lerp(this._spherical.theta, this._targetSpherical.theta, this.dampingFactor);
+                        this._spherical.phi = _Math.lerp(this._spherical.phi, this._targetSpherical.phi, this.dampingFactor);
+                        this._spherical.radius = _Math.lerp(this._spherical.radius, this._targetSpherical.radius, this.dampingFactor);
+                        this.target.x = _Math.lerp(this.target.x, this.target.x + this._targetOffset.x, this.dampingFactor);
+                        this.target.y = _Math.lerp(this.target.y, this.target.y + this._targetOffset.y, this.dampingFactor);
+                        this.target.z = _Math.lerp(this.target.z, this.target.z + this._targetOffset.z, this.dampingFactor);
+                        this._targetOffset.multiplyScalar(1 - this.dampingFactor);
+                    } else {
+                        this._spherical.theta = this._targetSpherical.theta;
+                        this._spherical.phi = this._targetSpherical.phi;
+                        this._spherical.radius = this._targetSpherical.radius;
+                        this.target.add(this._targetOffset);
+                        this._targetOffset.set(0, 0, 0);
+                    }
+                    this._updateCamera();
+                }
+
+                _updateCamera() {
+                    const { theta, phi, radius } = this._spherical;
+                    const sinPhi = Math.sin(phi);
+                    this.camera.position.x = this.target.x + radius * sinPhi * Math.sin(theta);
+                    this.camera.position.y = this.target.y + radius * Math.cos(phi);
+                    this.camera.position.z = this.target.z + radius * sinPhi * Math.cos(theta);
+                    this.camera.rotation.y = theta + Math.PI;
+                    this.camera.target = this.target;
+                }
+            }
+
+            return {
+                _Math,
+                Vector3,
+                Vector2,
+                Color,
+                Matrix4,
+                BufferGeometry,
+                BoxGeometry,
+                PlaneGeometry,
+                CylinderGeometry,
+                ShaderMaterial,
+                MeshBasicMaterial,
+                MeshLambertMaterial,
+                CanvasTexture,
+                Object3D,
+                Mesh,
+                Group,
+                Light,
+                AmbientLight,
+                PointLight,
+                PerspectiveCamera,
+                Scene,
+                Fog,
+                WebGLRenderer,
+                OrbitControls
+            };
+        })();
+
+        // ============================================================
+        // 场景构建
+        // ============================================================
+
+        const container = document.getElementById('container');
+        const loading = document.getElementById('loading');
+        const hint = document.getElementById('hint');
+
+        let scene, camera, renderer, controls;
+        let rainSystem, clock = { elapsedTime: 0, lastTime: 0 };
+        const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+        function init() {
+            const w = container.clientWidth;
+            const h = container.clientHeight;
+
+            // Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0a0e1a);
+            scene.fog = new THREE.Fog(0x0a0e1a, 8, 20);
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(45, w / h, 0.1, 50);
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({
+                canvas: document.createElement('canvas'),
+                width: w,
+                height: h,
+                clearColor: 0x0a0e1a,
+                antialias: true
+            });
+            renderer.canvas.style.display = 'block';
+            container.appendChild(renderer.canvas);
+
+            // Controls
+            controls = new THREE.OrbitControls(camera, renderer.canvas);
+            controls.target.set(0, 0.8, 0);
+            controls.minDistance = 3;
+            controls.maxDistance = 15;
+            controls.minPolarAngle = 0.15;
+            controls.maxPolarAngle = Math.PI / 2 - 0.05;
+
+            // Lights
+            const ambient = new THREE.AmbientLight(0x3a4a6a, 0.35);
+            scene.add(ambient);
+
+            // Build scene
+            buildScene();
+
+            // Resize
+            window.addEventListener('resize', onResize);
+            new ResizeObserver(onResize).observe(container);
+
+            // Hide loading
+            setTimeout(() => {
+                loading.style.opacity = '0';
+                setTimeout(() => loading.remove(), 500);
+            }, 300);
+
+            setTimeout(() => {
+                hint.style.opacity = '0';
+            }, 4000);
+
+            animate();
+        }
+
+        function onResize() {
+            const w = container.clientWidth;
+            const h = container.clientHeight;
+            camera.aspect = w / h;
+            camera.updateProjectionMatrix();
+            renderer.setSize(w, h);
+        }
+
+        // ——— 纹理生成工具 ———
+        function makeTexture(width, height, drawFn) {
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            drawFn(ctx, width, height);
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        // 便利店招牌纹理
+        function makeSignTexture() {
+            return makeTexture(256, 64, (ctx, w, h) => {
+                // 背景 - 蓝绿色
+                const grad = ctx.createLinearGradient(0, 0, 0, h);
+                grad.addColorStop(0, '#2de0c8');
+                grad.addColorStop(1, '#1ab0a0');
+                ctx.fillStyle = grad;
+                ctx.fillRect(0, 0, w, h);
+
+                // 边框
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 3;
+                ctx.strokeRect(4, 4, w - 8, h - 8);
+
+                // 文字 - 模拟日文便利店招牌
+                ctx.fillStyle = '#ffffff';
+                ctx.font = 'bold 32px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('コンビニ', w / 2, h / 2);
+
+                // 发光效果
+                ctx.shadowColor = '#2de0c8';
+                ctx.shadowBlur = 10;
+            });
+        }
+
+        // 路面纹理（湿滑积水）
+        function makeRoadTexture() {
+            return makeTexture(512, 512, (ctx, w, h) => {
+                // 深色沥青
+                ctx.fillStyle = '#1a1f2a';
+                ctx.fillRect(0, 0, w, h);
+
+                // 细微颗粒
+                for (let i = 0; i < 2000; i++) {
+                    const x = Math.random() * w;
+                    const y = Math.random() * h;
+                    const s = Math.random() * 1.5 + 0.5;
+                    ctx.fillStyle = `rgba(${30 + Math.random() * 20}, ${35 + Math.random() * 20}, ${45 + Math.random() * 20}, 0.6)`;
+                    ctx.fillRect(x, y, s, s);
+                }
+
+                // 积水反光斑块
+                for (let i = 0; i < 15; i++) {
+                    const x = Math.random() * w;
+                    const y = Math.random() * h;
+                    const rw = 40 + Math.random() * 100;
+                    const rh = 20 + Math.random() * 60;
+                    const grad = ctx.createRadialGradient(x, y, 0, x, y, Math.max(rw, rh));
+                    grad.addColorStop(0, 'rgba(80, 110, 150, 0.15)');
+                    grad.addColorStop(1, 'rgba(80, 110, 150, 0)');
+                    ctx.fillStyle = grad;
+                    ctx.beginPath();
+                    ctx.ellipse(x, y, rw, rh, Math.random() * Math.PI, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            });
+        }
+
+        // 人行道纹理
+        function makeSidewalkTexture() {
+            return makeTexture(256, 256, (ctx, w, h) => {
+                ctx.fillStyle = '#3a4050';
+                ctx.fillRect(0, 0, w, h);
+
+                // 砖块分隔
+                const tileW = 32, tileH = 32;
+                ctx.strokeStyle = '#2a3040';
+                ctx.lineWidth = 1;
+                for (let x = 0; x <= w; x += tileW) {
+                    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+                }
+                for (let y = 0; y <= h; y += tileH) {
+                    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+                }
+
+                // 湿滑反光
+                for (let i = 0; i < 8; i++) {
+                    const x = Math.random() * w;
+                    const y = Math.random() * h;
+                    const grad = ctx.createRadialGradient(x, y, 0, x, y, 25);
+                    grad.addColorStop(0, 'rgba(100, 120, 150, 0.12)');
+                    grad.addColorStop(1, 'rgba(100, 120, 150, 0)');
+                    ctx.fillStyle = grad;
+                    ctx.fillRect(x - 30, y - 30, 60, 60);
+                }
+            });
+        }
+
+        // 自动贩卖机纹理
+        function makeVendingTexture() {
+            return makeTexture(128, 256, (ctx, w, h) => {
+                // 机身
+                ctx.fillStyle = '#e8e8ee';
+                ctx.fillRect(0, 0, w, h);
+
+                // 顶部蓝色
+                ctx.fillStyle = '#2a5aa0';
+                ctx.fillRect(0, 0, w, 40);
+
+                // 展示窗
+                ctx.fillStyle = '#1a2030';
+                ctx.fillRect(10, 50, w - 20, 120);
+
+                // 饮料罐陈列
+                const cans = ['#ff4444', '#ffcc00', '#44ccff', '#ff88cc', '#88ff88', '#ff8844'];
+                for (let row = 0; row < 2; row++) {
+                    for (let col = 0; col < 3; col++) {
+                        const cx = 20 + col * 35;
+                        const cy = 70 + row * 50;
+                        ctx.fillStyle = cans[row * 3 + col];
+                        ctx.fillRect(cx, cy, 25, 40);
+                        // 高光
+                        ctx.fillStyle = 'rgba(255,255,255,0.3)';
+                        ctx.fillRect(cx + 2, cy + 2, 6, 36);
+                    }
+                }
+
+                // 取货口
+                ctx.fillStyle = '#333';
+                ctx.fillRect(15, 185, w - 30, 35);
+
+                // 按钮
+                for (let i = 0; i < 3; i++) {
+                    ctx.fillStyle = '#ffcc00';
+                    ctx.beginPath();
+                    ctx.arc(25 + i * 35, 175, 5, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                // 品牌文字
+                ctx.fillStyle = '#fff';
+                ctx.font = 'bold 14px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('DRINK', w / 2, 25);
+            });
+        }
+
+        // 窗户玻璃 + 室内模糊纹理
+        function makeWindowTexture() {
+            return makeTexture(256, 256, (ctx, w, h) => {
+                // 玻璃底色
+                ctx.fillStyle = 'rgba(255, 245, 220, 0.9)';
+                ctx.fillRect(0, 0, w, h);
+
+                // 室内暖光渐变
+                const grad = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w * 0.7);
+                grad.addColorStop(0, 'rgba(255, 230, 180, 1)');
+                grad.addColorStop(0.5, 'rgba(255, 210, 150, 0.8)');
+                grad.addColorStop(1, 'rgba(200, 170, 120, 0.6)');
+                ctx.fillStyle = grad;
+                ctx.fillRect(0, 0, w, h);
+
+                // 模糊的货架线条
+                ctx.fillStyle = 'rgba(180, 140, 100, 0.3)';
+                for (let i = 0; i < 5; i++) {
+                    ctx.fillRect(0, 30 + i * 45, w, 3);
+                }
+
+                // 雨滴痕迹
+                ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+                ctx.lineWidth = 1;
+                for (let i = 0; i < 15; i++) {
+                    const x = Math.random() * w;
+                    const y = Math.random() * h * 0.3;
+                    const len = 10 + Math.random() * 30;
+                    ctx.beginPath();
+                    ctx.moveTo(x, y);
+                    ctx.lineTo(x + (Math.random() - 0.5) * 4, y + len);
+                    ctx.stroke();
+                }
+            });
+        }
+
+        // 店内货架纹理
+        function makeShelfTexture() {
+            return makeTexture(128, 256, (ctx, w, h) => {
+                // 货架背板
+                ctx.fillStyle = '#f5f0e5';
+                ctx.fillRect(0, 0, w, h);
+
+                // 层板
+                ctx.fillStyle = '#d4c8b0';
+                const shelfCount = 5;
+                const shelfH = h / shelfCount;
+                for (let i = 1; i < shelfCount; i++) {
+                    ctx.fillRect(0, i * shelfH - 3, w, 6);
+                }
+
+                // 商品色块（模拟零食饮料）
+                const colors = ['#ff6b6b', '#ffd93d', '#6bcb77', '#4d96ff', '#ff922b', '#cc5de8'];
+                for (let i = 0; i < shelfCount; i++) {
+                    const y = i * shelfH + 8;
+                    for (let j = 0; j < 5; j++) {
+                        const x = 5 + j * 24;
+                        ctx.fillStyle = colors[(i + j) % colors.length];
+                        ctx.fillRect(x, y, 20, shelfH - 16);
+                        // 标签
+                        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+                        ctx.fillRect(x, y + shelfH - 22, 20, 6);
+                    }
+                }
+            });
+        }
+
+        function buildScene() {
+            const baseSize = 10;
+            const baseY = 0;
+
+            // ===== 地面底座 =====
+            const baseGeo = new THREE.BoxGeometry(baseSize, 0.3, baseSize);
+            const baseMat = new THREE.MeshLambertMaterial({ color: 0x2a3040 });
+            const base = new THREE.Mesh(baseGeo, baseMat);
+            base.position.y = -0.15;
+            scene.add(base);
+
+            // ===== 道路 =====
+            const roadTex = makeRoadTexture();
+            const roadGeo = new THREE.PlaneGeometry(baseSize * 0.9, baseSize * 0.5);
+            const roadMat = new THREE.MeshLambertMaterial({ color: 0xffffff, map: roadTex });
+            const road = new THREE.Mesh(roadGeo, roadMat);
+            road.rotation.x = -Math.PI / 2;
+            road.position.y = 0.001;
+            road.position.z = -1.5;
+            scene.add(road);
+
+            // 斑马线
+            const crosswalkGeo = new THREE.PlaneGeometry(2.5, 0.8);
+            const crosswalkTex = makeTexture(128, 32, (ctx, w, h) => {
+                ctx.clearRect(0, 0, w, h);
+                ctx.fillStyle = 'rgba(255,255,255,0.6)';
+                for (let i = 0; i < 6; i++) {
+                    ctx.fillRect(i * 22 + 2, 4, 16, h - 8);
+                }
+            });
+            const crosswalkMat = new THREE.MeshBasicMaterial({ map: crosswalkTex, transparent: true });
+            const crosswalk = new THREE.Mesh(crosswalkGeo, crosswalkMat);
+            crosswalk.rotation.x = -Math.PI / 2;
+            crosswalk.position.set(0, 0.002, -2.5);
+            scene.add(crosswalk);
+
+            // ===== 人行道 =====
+            const sidewalkTex = makeSidewalkTexture();
+            const sidewalkGeo = new THREE.PlaneGeometry(baseSize * 0.9, baseSize * 0.45);
+            const sidewalkMat = new THREE.MeshLambertMaterial({ color: 0xffffff, map: sidewalkTex });
+            const sidewalk = new THREE.Mesh(sidewalkGeo, sidewalkMat);
+            sidewalk.rotation.x = -Math.PI / 2;
+            sidewalk.position.y = 0.05;
+            sidewalk.position.z = 0.8;
+            scene.add(sidewalk);
+
+            // ===== 便利店主体 =====
+            const storeGroup = new THREE.Group();
+            scene.add(storeGroup);
+
+            // 建筑主体
+            const storeW = 3.5, storeH = 2.8, storeD = 3;
+            const storeGeo = new THREE.BoxGeometry(storeW, storeH, storeD);
+            const storeMat = new THREE.MeshLambertMaterial({ color: 0xf0ebe0 });
+            const store = new THREE.Mesh(storeGeo, storeMat);
+            store.position.y = storeH / 2 + 0.05;
+            storeGroup.add(store);
+
+            // 屋顶/雨棚
+            const roofGeo = new THREE.BoxGeometry(storeW + 0.4, 0.15, storeD + 0.6);
+            const roofMat = new THREE.MeshLambertMaterial({ color: 0x3a7d6b });
+            const roof = new THREE.Mesh(roofGeo, roofMat);
+            roof.position.y = storeH + 0.075 + 0.05;
+            roof.position.z = 0.1;
+            storeGroup.add(roof);
+
+            // 招牌
+            const signTex = makeSignTexture();
+            const signGeo = new THREE.PlaneGeometry(2.8, 0.7);
+            const signMat = new THREE.MeshBasicMaterial({ map: signTex, side: 2 });
+            const sign = new THREE.Mesh(signGeo, signMat);
+            sign.position.set(0, storeH - 0.3 + 0.05, storeD / 2 + 0.01);
+            storeGroup.add(sign);
+
+            // 招牌发光体（背面）
+            const signLightGeo = new THREE.BoxGeometry(2.7, 0.6, 0.05);
+            const signLightMat = new THREE.MeshBasicMaterial({ color: 0x1dd3b8, transparent: true, opacity: 0.3 });
+            const signLight = new THREE.Mesh(signLightGeo, signLightMat);
+            signLight.position.set(0, storeH - 0.3 + 0.05, storeD / 2 - 0.03);
+            storeGroup.add(signLight);
+
+            // —— 正面大玻璃窗 ——
+            const windowTex = makeWindowTexture();
+            const windowGeo = new THREE.PlaneGeometry(storeW * 0.75, storeH * 0.7);
+            const windowMat = new THREE.MeshBasicMaterial({ map: windowTex, transparent: true, opacity: 0.95 });
+            const window = new THREE.Mesh(windowGeo, windowMat);
+            window.position.set(-0.3, storeH * 0.45 + 0.05, storeD / 2 + 0.01);
+            storeGroup.add(window);
+
+            // 窗框
+            let frameMat = new THREE.MeshLambertMaterial({ color: 0x2a2a35 });
+            const frameThick = 0.06;
+            // 竖框
+            const vFrameGeo = new THREE.BoxGeometry(frameThick, storeH * 0.7, 0.05);
+            const vFrame1 = new THREE.Mesh(vFrameGeo, frameMat);
+            vFrame1.position.set(-storeW * 0.375 - 0.3, storeH * 0.45 + 0.05, storeD / 2 + 0.02);
+            storeGroup.add(vFrame1);
+            const vFrame2 = new THREE.Mesh(vFrameGeo, frameMat);
+            vFrame2.position.set(storeW * 0.375 - 0.3, storeH * 0.45 + 0.05, storeD / 2 + 0.02);
+            storeGroup.add(vFrame2);
+            // 横框
+            const hFrameGeo = new THREE.BoxGeometry(storeW * 0.75 + frameThick * 2, frameThick, 0.05);
+            const hFrame1 = new THREE.Mesh(hFrameGeo, frameMat);
+            hFrame1.position.set(-0.3, storeH * 0.8 + 0.05, storeD / 2 + 0.02);
+            storeGroup.add(hFrame1);
+            const hFrame2 = new THREE.Mesh(hFrameGeo, frameMat);
+            hFrame2.position.set(-0.3, storeH * 0.1 + 0.05, storeD / 2 + 0.02);
+            storeGroup.add(hFrame2);
+
+            // —— 自动门 ——
+            const doorGeo = new THREE.PlaneGeometry(storeW * 0.2, storeH * 0.55);
+            const doorMat = new THREE.MeshBasicMaterial({ color: 0xe8f0ff, transparent: true, opacity: 0.8 });
+            const door = new THREE.Mesh(doorGeo, doorMat);
+            door.position.set(storeW * 0.4, storeH * 0.32 + 0.05, storeD / 2 + 0.01);
+            storeGroup.add(door);
+
+            // 门框
+            const doorFrameGeo = new THREE.BoxGeometry(storeW * 0.2 + 0.08, storeH * 0.55 + 0.08, 0.06);
+            const doorFrameMat = new THREE.MeshLambertMaterial({ color: 0xc0c0d0 });
+            const doorFrame = new THREE.Mesh(doorFrameGeo, doorFrameMat);
+            doorFrame.position.set(storeW * 0.4, storeH * 0.32 + 0.05, storeD / 2 + 0.02);
+            storeGroup.add(doorFrame);
+
+            // 门内贴
+            const doorInnerGeo = new THREE.BoxGeometry(storeW * 0.18, storeH * 0.52, 0.02);
+            const doorInnerMat = new THREE.MeshBasicMaterial({ color: 0xfff5d0 });
+            const doorInner = new THREE.Mesh(doorInnerGeo, doorInnerMat);
+            doorInner.position.set(storeW * 0.4, storeH * 0.32 + 0.05, storeD / 2 - 0.02);
+            storeGroup.add(doorInner);
+
+            // ===== 店内细节 =====
+            const interiorGroup = new THREE.Group();
+            interiorGroup.position.z = -0.3;
+            storeGroup.add(interiorGroup);
+
+            // 店内地板
+            const floorGeo = new THREE.PlaneGeometry(storeW * 0.9, storeD * 0.8);
+            const floorTex = makeTexture(128, 128, (ctx, w, h) => {
+                ctx.fillStyle = '#e8e0d0';
+                ctx.fillRect(0, 0, w, h);
+                ctx.strokeStyle = '#d0c8b8';
+                ctx.lineWidth = 1;
+                for (let x = 0; x <= w; x += 16) {
+                    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+                }
+                for (let y = 0; y <= h; y += 16) {
+                    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+                }
+            });
+            const floorMat = new THREE.MeshLambertMaterial({ map: floorTex });
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.rotation.x = -Math.PI / 2;
+            floor.position.y = 0.06;
+            interiorGroup.add(floor);
+
+            // 背面货架
+            const shelfTex = makeShelfTexture();
+            const shelfGeo = new THREE.PlaneGeometry(2.2, 1.8);
+            const shelfMat = new THREE.MeshLambertMaterial({ map: shelfTex });
+            const backShelf = new THREE.Mesh(shelfGeo, shelfMat);
+            backShelf.position.set(0, 1.1, -storeD * 0.35);
+            interiorGroup.add(backShelf);
+
+            // 左侧货架
+            const sideShelfGeo = new THREE.PlaneGeometry(1.2, 1.8);
+            const sideShelf = new THREE.Mesh(sideShelfGeo, shelfMat);
+            sideShelf.position.set(-storeW * 0.38, 1.1, 0);
+            sideShelf.rotation.y = Math.PI / 2;
+            interiorGroup.add(sideShelf);
+
+            // 收银台
+            const counterGeo = new THREE.BoxGeometry(0.9, 0.7, 0.5);
+            const counterMat = new THREE.MeshLambertMaterial({ color: 0xd4c8b8 });
+            const counter = new THREE.Mesh(counterGeo, counterMat);
+            counter.position.set(storeW * 0.25, 0.4, storeD * 0.2);
+            interiorGroup.add(counter);
+
+            // 收银机
+            const regGeo = new THREE.BoxGeometry(0.25, 0.25, 0.3);
+            const regMat = new THREE.MeshLambertMaterial({ color: 0x4a4a5a });
+            const register = new THREE.Mesh(regGeo, regMat);
+            register.position.set(storeW * 0.25, 0.85, storeD * 0.25);
+            interiorGroup.add(register);
+
+            // 饮料冷柜（右侧）
+            const coolerGeo = new THREE.BoxGeometry(0.7, 1.6, 0.6);
+            const coolerMat = new THREE.MeshLambertMaterial({ color: 0xd0d8e0 });
+            const cooler = new THREE.Mesh(coolerGeo, coolerMat);
+            cooler.position.set(storeW * 0.35, 0.9, -storeD * 0.1);
+            interiorGroup.add(cooler);
+
+            // 冷柜玻璃门
+            const coolerDoorGeo = new THREE.PlaneGeometry(0.6, 1.4);
+            const coolerDoorMat = new THREE.MeshBasicMaterial({ color: 0xb8e0ff, transparent: true, opacity: 0.5 });
+            const coolerDoor = new THREE.Mesh(coolerDoorGeo, coolerDoorMat);
+            coolerDoor.position.set(storeW * 0.35, 0.95, -storeD * 0.1 + 0.31);
+            interiorGroup.add(coolerDoor);
+
+            // 店内顶灯（发光面板）
+            const ceilingLightGeo = new THREE.PlaneGeometry(0.8, 0.4);
+            const ceilingLightMat = new THREE.MeshBasicMaterial({ color: 0xfff0d0 });
+            const ceilingLight1 = new THREE.Mesh(ceilingLightGeo, ceilingLightMat);
+            ceilingLight1.rotation.x = Math.PI / 2;
+            ceilingLight1.position.set(-0.5, storeH - 0.05 + 0.05, -0.2);
+            interiorGroup.add(ceilingLight1);
+
+            const ceilingLight2 = new THREE.Mesh(ceilingLightGeo, ceilingLightMat);
+            ceilingLight2.rotation.x = Math.PI / 2;
+            ceilingLight2.position.set(0.8, storeH - 0.05 + 0.05, -0.5);
+            interiorGroup.add(ceilingLight2);
+
+            // 关东煮柜台（门口旁）
+            const odenGeo = new THREE.BoxGeometry(0.5, 0.5, 0.4);
+            const odenMat = new THREE.MeshLambertMaterial({ color: 0xc0a080 });
+            const oden = new THREE.Mesh(odenGeo, odenMat);
+            oden.position.set(storeW * 0.1, 0.3, storeD * 0.3);
+            interiorGroup.add(oden);
+
+            // 关东煮锅（发光）
+            const odenPotGeo = new THREE.CylinderGeometry(0.15, 0.15, 0.12, 16);
+            const odenPotMat = new THREE.MeshBasicMaterial({ color: 0xffdd88 });
+            const odenPot = new THREE.Mesh(odenPotGeo, odenPotMat);
+            odenPot.position.set(storeW * 0.1, 0.58, storeD * 0.3);
+            interiorGroup.add(odenPot);
+
+            // ===== 街道元素 =====
+
+            // 自动贩卖机
+            const vendingTex = makeVendingTexture();
+            const vendingGeo = new THREE.PlaneGeometry(0.8, 1.6);
+            const vendingMat = new THREE.MeshLambertMaterial({ map: vendingTex });
+            const vending = new THREE.Mesh(vendingGeo, vendingMat);
+            vending.position.set(-2.8, 0.85, 0.5);
+            scene.add(vending);
+
+            // 贩卖机侧面
+            const vendingSideGeo = new THREE.BoxGeometry(0.1, 1.6, 0.7);
+            const vendingSideMat = new THREE.MeshLambertMaterial({ color: 0xd0d0d8 });
+            const vendingSide = new THREE.Mesh(vendingSideGeo, vendingSideMat);
+            vendingSide.position.set(-2.85, 0.85, 0.5);
+            scene.add(vendingSide);
+
+            // 自行车
+            const bikeGroup = new THREE.Group();
+            bikeGroup.position.set(-2, 0.15, 1.2);
+            bikeGroup.rotation.y = 0.3;
+            scene.add(bikeGroup);
+
+            // 车轮
+            const wheelGeo = THREE.TorusGeometry = (function () {
+                // Simple wheel using cylinder
+                return function (r, tube, radial, tubular) {
+                    const geo = new THREE.CylinderGeometry(r, r, tube * 2, 16);
+                    return geo;
+                };
+            })();
+            const wheelMat = new THREE.MeshLambertMaterial({ color: 0x222222 });
+            const wheel1 = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.04, 16), wheelMat);
+            wheel1.rotation.z = Math.PI / 2;
+            wheel1.position.set(0.4, 0, 0);
+            bikeGroup.add(wheel1);
+            const wheel2 = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.04, 16), wheelMat);
+            wheel2.rotation.z = Math.PI / 2;
+            wheel2.position.set(-0.4, 0, 0);
+            bikeGroup.add(wheel2);
+
+            // 车架
+            frameMat = new THREE.MeshLambertMaterial({ color: 0x4a90d9 });
+            const frameBar1 = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.6, 8), frameMat);
+            frameBar1.rotation.z = Math.PI / 6;
+            frameBar1.position.set(0, 0.25, 0);
+            bikeGroup.add(frameBar1);
+            const frameBar2 = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.5, 8), frameMat);
+            frameBar2.rotation.z = -Math.PI / 4;
+            frameBar2.position.set(-0.1, 0.2, 0);
+            bikeGroup.add(frameBar2);
+            const seatPost = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.25, 8), frameMat);
+            seatPost.position.set(-0.25, 0.4, 0);
+            bikeGroup.add(seatPost);
+            // 车座
+            const seatGeo = new THREE.BoxGeometry(0.12, 0.04, 0.06);
+            const seatMat = new THREE.MeshLambertMaterial({ color: 0x1a1a1a });
+            const seat = new THREE.Mesh(seatGeo, seatMat);
+            seat.position.set(-0.25, 0.52, 0);
+            bikeGroup.add(seat);
+            // 车把
+            const handlebar = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.02, 0.25), frameMat);
+            handlebar.position.set(0.25, 0.45, 0);
+            bikeGroup.add(handlebar);
+
+            // 路灯
+            const lampGroup = new THREE.Group();
+            lampGroup.position.set(2.5, 0, 1.5);
+            scene.add(lampGroup);
+
+            const poleGeo = new THREE.CylinderGeometry(0.03, 0.04, 2.2, 8);
+            const poleMat = new THREE.MeshLambertMaterial({ color: 0x4a4a55 });
+            const pole = new THREE.Mesh(poleGeo, poleMat);
+            pole.position.y = 1.1;
+            lampGroup.add(pole);
+
+            const lampArmGeo = new THREE.BoxGeometry(0.5, 0.03, 0.03);
+            const lampArm = new THREE.Mesh(lampArmGeo, poleMat);
+            lampArm.position.set(-0.2, 2.1, 0);
+            lampGroup.add(lampArm);
+
+            // 灯罩
+            const lampHeadGeo = new THREE.BoxGeometry(0.25, 0.08, 0.15);
+            const lampHeadMat = new THREE.MeshLambertMaterial({ color: 0x3a3a45, emissive: 0xffeebb, emissiveIntensity: 0.5 });
+            const lampHead = new THREE.Mesh(lampHeadGeo, lampHeadMat);
+            lampHead.position.set(-0.45, 2.05, 0);
+            lampGroup.add(lampHead);
+
+            // 路灯光晕
+            const lampGlowGeo = new THREE.PlaneGeometry(1.5, 1.5);
+            const lampGlowTex = makeTexture(128, 128, (ctx, w, h) => {
+                const grad = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2);
+                grad.addColorStop(0, 'rgba(255, 220, 160, 0.4)');
+                grad.addColorStop(0.5, 'rgba(255, 200, 130, 0.1)');
+                grad.addColorStop(1, 'rgba(255, 180, 100, 0)');
+                ctx.fillStyle = grad;
+                ctx.fillRect(0, 0, w, h);
+            });
+            const lampGlowMat = new THREE.MeshBasicMaterial({ map: lampGlowTex, transparent: true, depthWrite: false });
+            const lampGlow = new THREE.Mesh(lampGlowGeo, lampGlowMat);
+            lampGlow.rotation.x = -Math.PI / 2;
+            lampGlow.position.set(-0.45, 0.02, 0);
+            lampGroup.add(lampGlow);
+
+            // 电线杆与电线
+            const utilityPoleGeo = new THREE.CylinderGeometry(0.04, 0.05, 3, 8);
+            const utilityPoleMat = new THREE.MeshLambertMaterial({ color: 0x5a4a3a });
+            const utilityPole = new THREE.Mesh(utilityPoleGeo, utilityPoleMat);
+            utilityPole.position.set(-3.5, 1.5, -1);
+            scene.add(utilityPole);
+
+            // 电线杆横担
+            const crossarmGeo = new THREE.BoxGeometry(0.8, 0.04, 0.04);
+            const crossarm = new THREE.Mesh(crossarmGeo, utilityPoleMat);
+            crossarm.position.set(-3.5, 2.8, -1);
+            scene.add(crossarm);
+
+            // 电线（简化为线条感的细盒）
+            const wireMat = new THREE.MeshBasicMaterial({ color: 0x1a1a25, transparent: true, opacity: 0.6 });
+            for (let i = 0; i < 3; i++) {
+                const wireGeo = new THREE.BoxGeometry(4, 0.008, 0.008);
+                const wire = new THREE.Mesh(wireGeo, wireMat);
+                wire.position.set(-1.5, 2.7 - i * 0.08, -1);
+                wire.rotation.y = 0.15;
+                scene.add(wire);
+            }
+
+            // 垃圾桶
+            const trashGeo = new THREE.CylinderGeometry(0.15, 0.13, 0.4, 12);
+            const trashMat = new THREE.MeshLambertMaterial({ color: 0x555566 });
+            const trash = new THREE.Mesh(trashGeo, trashMat);
+            trash.position.set(2.2, 0.25, 0.8);
+            scene.add(trash);
+            // 垃圾桶盖
+            const trashLidGeo = new THREE.CylinderGeometry(0.17, 0.17, 0.05, 12);
+            const trashLid = new THREE.Mesh(trashLidGeo, trashMat);
+            trashLid.position.set(2.2, 0.48, 0.8);
+            scene.add(trashLid);
+
+            // 雨伞架
+            const umbrellaRackGeo = new THREE.BoxGeometry(0.3, 0.5, 0.15);
+            const umbrellaRackMat = new THREE.MeshLambertMaterial({ color: 0x888899 });
+            const umbrellaRack = new THREE.Mesh(umbrellaRackGeo, umbrellaRackMat);
+            umbrellaRack.position.set(1.2, 0.3, 1.6);
+            scene.add(umbrellaRack);
+
+            // 几把雨伞
+            const umbrellaColors = [0xff4466, 0x4488ff, 0x44cc88];
+            for (let i = 0; i < 3; i++) {
+                const umbGeo = new THREE.CylinderGeometry(0.015, 0.015, 0.55, 6);
+                const umbMat = new THREE.MeshLambertMaterial({ color: umbrellaColors[i] });
+                const umb = new THREE.Mesh(umbGeo, umbMat);
+                umb.position.set(1.1 + i * 0.08, 0.45, 1.6);
+                umb.rotation.z = (Math.random() - 0.5) * 0.3;
+                scene.add(umb);
+                // 伞柄
+                const handleGeo = new THREE.BoxGeometry(0.04, 0.08, 0.02);
+                const handle = new THREE.Mesh(handleGeo, new THREE.MeshLambertMaterial({ color: 0x333 }));
+                handle.position.set(1.1 + i * 0.08, 0.15, 1.6);
+                scene.add(handle);
+            }
+
+            // 路牌
+            const signPoleGeo = new THREE.CylinderGeometry(0.015, 0.015, 0.8, 6);
+            const signPoleMat = new THREE.MeshLambertMaterial({ color: 0x666 });
+            const signPole = new THREE.Mesh(signPoleGeo, signPoleMat);
+            signPole.position.set(1.8, 0.45, -0.5);
+            scene.add(signPole);
+
+            const roadSignGeo = new THREE.BoxGeometry(0.4, 0.25, 0.02);
+            const roadSignMat = new THREE.MeshLambertMaterial({ color: 0x3a60b0, emissive: 0x1a2040 });
+            const roadSign = new THREE.Mesh(roadSignGeo, roadSignMat);
+            roadSign.position.set(1.8, 0.9, -0.5);
+            roadSign.rotation.y = -0.3;
+            scene.add(roadSign);
+
+            // 空调外机
+            const acGeo = new THREE.BoxGeometry(0.5, 0.35, 0.25);
+            const acMat = new THREE.MeshLambertMaterial({ color: 0xd0d0d8 });
+            const ac = new THREE.Mesh(acGeo, acMat);
+            ac.position.set(-2.5, 0.3, -0.8);
+            ac.rotation.y = 0.2;
+            scene.add(ac);
+            // 风扇格栅
+            const fanGeo = new THREE.CylinderGeometry(0.12, 0.12, 0.02, 12);
+            const fanMat = new THREE.MeshLambertMaterial({ color: 0x888 });
+            const fan = new THREE.Mesh(fanGeo, fanMat);
+            fan.position.set(-2.5, 0.3, -0.68);
+            fan.rotation.x = Math.PI / 2;
+            scene.add(fan);
+
+            // 排水沟
+            const drainGeo = new THREE.BoxGeometry(4, 0.02, 0.15);
+            const drainMat = new THREE.MeshLambertMaterial({ color: 0x1a1f2a });
+            const drain = new THREE.Mesh(drainGeo, drainMat);
+            drain.position.set(0, 0.06, 0.05);
+            scene.add(drain);
+
+            // 护栏
+            const railMat = new THREE.MeshLambertMaterial({ color: 0x888899 });
+            for (let i = 0; i < 5; i++) {
+                const postGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.4, 6);
+                const post = new THREE.Mesh(postGeo, railMat);
+                post.position.set(-2 + i, 0.25, -0.4);
+                scene.add(post);
+            }
+            const railBarGeo = new THREE.BoxGeometry(4, 0.03, 0.03);
+            const railBar = new THREE.Mesh(railBarGeo, railMat);
+            railBar.position.set(0, 0.4, -0.4);
+            scene.add(railBar);
+
+            // 地垫（门口）
+            const matGeo = new THREE.PlaneGeometry(0.8, 0.4);
+            const matTex = makeTexture(64, 32, (ctx, w, h) => {
+                ctx.fillStyle = '#5a4030';
+                ctx.fillRect(0, 0, w, h);
+                // 纹路
+                ctx.strokeStyle = '#4a3020';
+                ctx.lineWidth = 1;
+                for (let i = 0; i < 8; i++) {
+                    ctx.beginPath();
+                    ctx.moveTo(0, i * 4 + 2);
+                    ctx.lineTo(w, i * 4 + 2);
+                    ctx.stroke();
+                }
+            });
+            const matMat = new THREE.MeshLambertMaterial({ map: matTex });
+            const doormat = new THREE.Mesh(matGeo, matMat);
+            doormat.rotation.x = -Math.PI / 2;
+            doormat.position.set(1.2, 0.055, 1.58);
+            scene.add(doormat);
+
+            // 海报栏
+            const posterBoardGeo = new THREE.BoxGeometry(0.4, 0.6, 0.03);
+            const posterTex = makeTexture(64, 96, (ctx, w, h) => {
+                ctx.fillStyle = '#fff5e0';
+                ctx.fillRect(0, 0, w, h);
+                // 模拟海报内容
+                ctx.fillStyle = '#ff6b8a';
+                ctx.fillRect(4, 4, w - 8, 25);
+                ctx.fillStyle = '#333';
+                ctx.font = '8px sans-serif';
+                ctx.fillText('NEW!', 8, 20);
+                ctx.fillStyle = '#4a90d9';
+                ctx.fillRect(4, 35, w - 8, 20);
+                ctx.fillStyle = '#6bcb77';
+                ctx.fillRect(4, 60, w - 8, 20);
+                // 边框
+                ctx.strokeStyle = '#888';
+                ctx.lineWidth = 1;
+                ctx.strokeRect(1, 1, w - 2, h - 2);
+            });
+            const posterMat = new THREE.MeshLambertMaterial({ map: posterTex });
+            const posterBoard = new THREE.Mesh(posterBoardGeo, posterMat);
+            posterBoard.position.set(-1.5, 0.5, 1.6);
+            posterBoard.rotation.y = 0.1;
+            scene.add(posterBoard);
+
+            // 小巷入口（左侧深处）
+            const alleyGeo = new THREE.BoxGeometry(1.5, 2, 0.1);
+            const alleyMat = new THREE.MeshBasicMaterial({ color: 0x0a0c12 });
+            const alley = new THREE.Mesh(alleyGeo, alleyMat);
+            alley.position.set(-3.2, 1, -2);
+            scene.add(alley);
+
+            // 小巷地面
+            const alleyFloorGeo = new THREE.PlaneGeometry(1.5, 1);
+            const alleyFloorMat = new THREE.MeshLambertMaterial({ color: 0x1a1c22 });
+            const alleyFloor = new THREE.Mesh(alleyFloorGeo, alleyFloorMat);
+            alleyFloor.rotation.x = -Math.PI / 2;
+            alleyFloor.position.set(-3.2, 0.01, -2.5);
+            scene.add(alleyFloor);
+
+            // ===== 降雨系统 =====
+            if (!reducedMotion) {
+                createRainSystem();
+            }
+
+            // ===== 地面积水反光 =====
+            createPuddleReflections();
+
+            // 场景轻微浮动动画标记
+            store.userData.floatOffset = Math.random() * Math.PI * 2;
+            lampGroup.userData.flickerOffset = Math.random() * Math.PI * 2;
+            sign.userData.flickerOffset = Math.random() * Math.PI * 2;
+        }
+
+        function createRainSystem() {
+            // 使用多个粒子平面模拟降雨
+            const rainCount = 300;
+            const rainGeo = new THREE.BufferGeometry();
+            const positions = new Float32Array(rainCount * 3);
+            const speeds = new Float32Array(rainCount);
+
+            for (let i = 0; i < rainCount; i++) {
+                positions[i * 3] = THREE._Math.randFloat(-5, 5);
+                positions[i * 3 + 1] = THREE._Math.randFloat(0.5, 4);
+                positions[i * 3 + 2] = THREE._Math.randFloat(-5, 5);
+                speeds[i] = THREE._Math.randFloat(2, 4);
+            }
+
+            rainGeo.setAttribute('position', { array: positions, itemSize: 3 });
+            rainGeo.setIndex([]); // not using index for points
+
+            // Rain material (shader)
+            const rainMat = new THREE.ShaderMaterial({
+                vertexShader: `
+            attribute vec3 position;
+            uniform mat4 projectionMatrix;
+            uniform mat4 modelViewMatrix;
+            uniform float time;
+            uniform float speed;
+            varying float vAlpha;
+            
+            void main(){
+                vec3 pos = position;
+                pos.y = mod(pos.y - time * speed, 4.0) + 0.5;
+                vAlpha = smoothstep(0.5, 1.0, pos.y / 4.0) * 0.6;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+                gl_PointSize = 1.5;
+            }
+        `,
+                fragmentShader: `
+            precision mediump float;
+            uniform vec3 color;
+            varying float vAlpha;
+            
+            void main(){
+                float dist = length(gl_PointCoord - vec2(0.5));
+                if(dist > 0.5) discard;
+                gl_FragColor = vec4(color, vAlpha * (1.0 - dist * 2.0));
+            }
+        `,
+                uniforms: {
+                    time: 0,
+                    speed: 3,
+                    color: new THREE.Color(0xa8c0e0)
+                },
+                transparent: true,
+                depthWrite: false
+            });
+
+            // 由于简化渲染器不支持Points，改用细小的盒子模拟雨丝
+            const rainGroup = new THREE.Group();
+            rainGroup.userData.speeds = speeds;
+            rainGroup.userData.positions = positions;
+            rainGroup.userData.rains = [];
+
+            const rainDropGeo = new THREE.BoxGeometry(0.01, 0.15, 0.01);
+            const rainDropMat = new THREE.MeshBasicMaterial({
+                color: 0xa8c0e0,
+                transparent: true,
+                opacity: 0.4
+            });
+
+            for (let i = 0; i < rainCount; i++) {
+                const drop = new THREE.Mesh(rainDropGeo, rainDropMat);
+                drop.position.set(
+                    positions[i * 3],
+                    positions[i * 3 + 1],
+                    positions[i * 3 + 2]
+                );
+                drop.userData.baseY = positions[i * 3 + 1];
+                drop.userData.speed = speeds[i];
+                rainGroup.add(drop);
+                rainGroup.userData.rains.push(drop);
+            }
+
+            scene.add(rainGroup);
+            rainSystem = rainGroup;
+        }
+
+        function createPuddleReflections() {
+            // 几处水洼反光
+            const puddlePositions = [
+                [-1.5, 0.003, -1.8, 0.8, 0.5],
+                [1.2, 0.003, -2.2, 0.6, 0.4],
+                [0.5, 0.003, 0.5, 0.5, 0.3],
+                [-2, 0.053, 1.5, 0.4, 0.25]
+            ];
+
+            puddlePositions.forEach(([x, y, z, w, h], i) => {
+                const puddleGeo = new THREE.PlaneGeometry(w, h);
+                const puddleTex = makeTexture(128, 64, (ctx, cw, ch) => {
+                    const grad = ctx.createRadialGradient(cw / 2, ch / 2, 0, cw / 2, ch / 2, cw * 0.6);
+                    grad.addColorStop(0, 'rgba(120, 160, 200, 0.25)');
+                    grad.addColorStop(0.7, 'rgba(100, 140, 180, 0.1)');
+                    grad.addColorStop(1, 'rgba(80, 120, 160, 0)');
+                    ctx.fillStyle = grad;
+                    ctx.fillRect(0, 0, cw, ch);
+                });
+                const puddleMat = new THREE.MeshBasicMaterial({ map: puddleTex, transparent: true, depthWrite: false });
+                const puddle = new THREE.Mesh(puddleGeo, puddleMat);
+                puddle.rotation.x = -Math.PI / 2;
+                puddle.position.set(x, y, z);
+                puddle.userData.ripplePhase = Math.random() * Math.PI * 2;
+                scene.add(puddle);
+            });
+        }
+
+        // ===== 动画循环 =====
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const now = performance.now() * 0.001;
+            const delta = now - clock.lastTime;
+            clock.lastTime = now;
+            clock.elapsedTime = now;
+
+            controls.update();
+
+            // 动画更新
+            if (!reducedMotion) {
+                updateRain(delta);
+                updateFlicker(now);
+                updateRipples(now);
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        function updateRain(delta) {
+            if (!rainSystem) return;
+
+            const rains = rainSystem.userData.rains;
+            for (let i = 0; i < rains.length; i++) {
+                const drop = rains[i];
+                drop.position.y -= drop.userData.speed * delta;
+                if (drop.position.y < 0) {
+                    drop.position.y = 3.5 + Math.random() * 0.5;
+                    // 轻微随机偏移
+                    drop.position.x = THREE._Math.randFloat(-5, 5);
+                    drop.position.z = THREE._Math.randFloat(-5, 5);
+                }
+            }
+        }
+
+        function updateFlicker(time) {
+            // 招牌轻微闪烁
+            scene.traverse(obj => {
+                if (obj.userData && obj.userData.flickerOffset !== undefined) {
+                    const flicker = 0.95 + Math.sin(time * 2 + obj.userData.flickerOffset) * 0.03
+                        + Math.sin(time * 7 + obj.userData.flickerOffset * 3) * 0.02;
+                    if (obj.material && obj.material.opacity !== undefined) {
+                        // store sign doesn't have opacity change, keep stable
+                    }
+                }
+            });
+        }
+
+        function updateRipples(time) {
+            // 水波纹动画（通过缩放模拟）
+            scene.traverse(obj => {
+                if (obj.userData && obj.userData.ripplePhase !== undefined) {
+                    const ripple = 1 + Math.sin(time * 1.5 + obj.userData.ripplePhase) * 0.05;
+                    obj.scale.set(ripple, 1, ripple * 0.8);
+                }
+            });
+        }
+
+        // 启动
+        init();
+    </script>
+</body>
+
+</html>

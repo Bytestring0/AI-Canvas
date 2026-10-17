@@ -1,0 +1,143 @@
+name: Run scheduled task plugins
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: ai-canvas-task-state
+  cancel-in-progress: false
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      enabled: ${{ steps.plan.outputs.enabled }}
+      base: ${{ steps.plan.outputs.base }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - id: plan
+        run: python -m canvas plan
+  capture:
+    needs: plan
+    if: needs.plan.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.base }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Capture task input using its configured credential
+        env:
+          TASK_ID: ${{ matrix.id }}
+          CANVAS_DATA_TOKEN: ${{ secrets[matrix.secret] }}
+        run: python -m canvas task "$TASK_ID" capture
+      - uses: actions/upload-artifact@v4
+        with:
+          name: task-input-${{ matrix.id }}
+          path: tasks/${{ matrix.id }}/data/
+          retention-days: 3
+  execute:
+    needs: [plan, capture]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.base }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: task-input-${{ matrix.id }}
+          path: tasks/${{ matrix.id }}/data/
+      - name: Prepare configured sandbox image
+        if: matrix.image != ''
+        env:
+          TASK_IMAGE: ${{ matrix.image }}
+        run: docker pull "$TASK_IMAGE"
+      - name: Run task without data credentials or repository write permissions
+        env:
+          TASK_ID: ${{ matrix.id }}
+        run: python -m canvas task "$TASK_ID" run
+      - uses: actions/upload-artifact@v4
+        with:
+          name: task-output-${{ matrix.id }}
+          path: tasks/${{ matrix.id }}/data/
+          retention-days: 7
+  persist:
+    needs: [plan, execute]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      changed: ${{ steps.commit.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - name: Reject overwriting concurrent repository changes
+        env:
+          EXPECTED_BASE: ${{ needs.plan.outputs.base }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_BASE"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: task-output-*
+          path: .work/results
+      - name: Restore each task's own result directory
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import shutil
+          from canvas.registry import tasks,task_root
+          for task in tasks():
+              source=Path('.work/results')/('task-output-'+task['id'])
+              if source.is_dir():
+                  shutil.copytree(source,task_root(task)/'data',dirs_exist_ok=True)
+          PY
+      - name: Commit result files only
+        id: commit
+        run: |
+          git config user.name 'ai-canvas[bot]'
+          git config user.email 'ai-canvas[bot]@users.noreply.github.com'
+          git add -- tasks/*/data
+          if ! git diff --cached --quiet; then
+            git commit -m 'data: update scheduled task results'
+            git push
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+          fi
+  publish:
+    needs: persist
+    if: needs.persist.outputs.changed == 'true'
+    uses: ./.github/workflows/pages.yml
+    permissions:
+      contents: read
+      pages: write
+      id-token: write

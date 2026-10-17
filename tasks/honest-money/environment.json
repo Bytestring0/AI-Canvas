@@ -1,0 +1,26 @@
+{
+  "schema_version": 2,
+  "initial_cash": 100000,
+  "annual_debt_interest": 0.06,
+  "max_debt": 200000,
+  "commission_rate": 0.0003,
+  "minimum_commission": 5,
+  "sell_tax_rate": 0.0005,
+  "slippage_bps": 5,
+  "lot_size": 100,
+  "universe": [
+    "600519.SH",
+    "601318.SH",
+    "600036.SH",
+    "000001.SZ",
+    "000333.SZ",
+    "000651.SZ",
+    "600900.SH",
+    "601398.SH"
+  ],
+  "ruleset": "sampled-intraday-v2",
+  "notes": "盘中每10分钟采样；下一轮新报价撮合；不回填漏跑的盘中成交。T+1按交易日计算。",
+  "cadence_minutes": 10,
+  "history_points": 240,
+  "max_quote_age_seconds": 600
+}

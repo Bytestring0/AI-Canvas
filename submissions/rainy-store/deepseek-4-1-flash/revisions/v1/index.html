@@ -1,0 +1,2439 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>雨夜便利店街角 · 三渲二微缩三维模型</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: #07080e; overflow: hidden;
+    font-family: "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", system-ui, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #stage {
+    display: block; position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    cursor: grab; touch-action: none; outline: none;
+    background: #07080e;
+  }
+  #stage.dragging { cursor: grabbing; }
+  #stage:focus-visible { box-shadow: inset 0 0 0 2px rgba(126, 214, 176, 0.55); }
+  .sr {
+    position: absolute; left: 0; top: 0; width: 1px; height: 1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+    border: 0; padding: 0; margin: -1px;
+  }
+  #fallback {
+    position: absolute; inset: 0; display: none;
+    align-items: center; justify-content: center; text-align: center;
+    color: #dfe6f1; font-size: 16px; line-height: 1.7;
+    padding: 32px; box-sizing: border-box;
+  }
+</style>
+</head>
+<body>
+<canvas id="stage" tabindex="0" role="application"
+        aria-label="雨夜便利店街角的三维微缩模型。拖拽旋转，Shift 加拖拽或右键拖拽平移，滚轮或双指缩放。"></canvas>
+<p class="sr">雨夜日本便利店街角的三维微缩模型：可以自由拖拽旋转、按住 Shift 拖拽平移、用滚轮或双指捏合缩放。键盘操作：方向键旋转视角，Shift 加方向键上下调整观察高度，PageUp 与 PageDown 缩放，R 键回到初始视角，M 键暂停或继续动画，P 键保存当前画面。</p>
+<div id="fallback"></div>
+<noscript><div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#e6ecf5;font-size:16px">需要启用 JavaScript 才能显示这个三维场景。</div></noscript>
+<script>
+/* @@PART1@@ */
+"use strict";
+(function () {
+/* ==========================================================================
+   YORU NO KONBINI — 雨夜便利店街角 · 三渲二微缩三维模型
+   A single-file WebGL2 toon-shaded diorama. No network, no external assets.
+   --------------------------------------------------------------------------
+   World units: 1 unit = 0.5 m. Base is a 40 x 40 square (20 m x 20 m).
+     +X east/right, +Z south/front, +Y up.
+     E-W road: z in [-20,-9].  N-S road: x in [-20,-9].
+     Store lot: x in [-9,20], z in [-9,20].
+     Store footprint: x in [-6,8], z in [-8.6,3.6], facade at z = 3.6.
+   ========================================================================== */
+
+var canvas = document.getElementById("stage");
+var gl = null;
+try {
+  gl = canvas.getContext("webgl2", { antialias: false, alpha: false, depth: false, stencil: false, premultipliedAlpha: false, powerPreference: "high-performance" });
+} catch (e) { gl = null; }
+if (!gl) { fail("此浏览器未能启用 WebGL2，无法渲染三维场景。请使用较新的 Chrome、Firefox 或 Safari 打开。"); return; }
+
+function fail(msg) {
+  var f = document.getElementById("fallback");
+  if (f) { f.textContent = msg; f.style.display = "flex"; }
+  if (canvas) canvas.style.display = "none";
+}
+
+var mqReduce = window.matchMedia ? window.matchMedia("(prefers-reduced-motion: reduce)") : null;
+var reduced = !!(mqReduce && mqReduce.matches);
+var animON = !reduced;
+var timeScale = reduced ? 0.35 : 1;
+var toonOn = true;
+var dprCap = 2;
+var T = 0, RT = 0;
+var PI = Math.PI;
+function rad(d) { return d * PI / 180; }
+function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
+function rng(seed) { var s = seed >>> 0; return function () { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
+
+/* ------------------------------------------------------------------ palette */
+function col(hex, k) {
+  k = (k === undefined) ? 1 : k;
+  var s = hex.charAt(0) === "#" ? hex.substr(1) : hex;
+  return [parseInt(s.substr(0, 2), 16) / 255 * k,
+          parseInt(s.substr(2, 2), 16) / 255 * k,
+          parseInt(s.substr(4, 2), 16) / 255 * k];
+}
+var C = {
+  baseSide: col("#232936"), baseTrim: col("#39425a"), baseTop: col("#1d222c"),
+  asphalt: col("#3b404c"), walk: col("#9b968d"), curb: col("#c3bdb1"),
+  paint: col("#e9edf1"), paintY: col("#f0c040"),
+  wall: col("#ece6da"), wallShade: col("#d3ccbe"),
+  concrete: col("#b6b2aa"), concreteDark: col("#8a8680"),
+  metal: col("#a4abb5"), metalDark: col("#59616c"), steel: col("#8e97a3"),
+  white: col("#f3f5f7"), black: col("#23262d"),
+  green: col("#2fa36b"), greenDark: col("#1d734e"), greenLight: col("#63cc95"),
+  glass: col("#a6d8e8"), roof: col("#4f596a"), roofDark: col("#3d4553"),
+  shelf: col("#e8ebef"), shelfTrim: col("#c4cad2"),
+  wood: col("#c6a074"), woodDark: col("#796043"), brown: col("#6b4c37"),
+  pole: col("#a8a199"), poleDark: col("#6c6863"), wire: col("#1c212a"),
+  leaf: col("#3d6d4b"), leaf2: col("#518755"), leaf3: col("#2e583c"),
+  vendBlue: col("#3d7fd9"), vendRed: col("#d5483f"), counter: col("#eef1f4"),
+  g1: col("#ff8158"), g2: col("#ffd166"), g3: col("#6cc5ff"), g4: col("#ff6f91"),
+  g5: col("#84e08a"), g6: col("#bfa2ff"), g7: col("#f6f6f6"), g8: col("#5a72d8"),
+  g9: col("#ffb347"), g10: col("#79e0d0"), g11: col("#e9c8a0"), g12: col("#9ad6ff")
+};
+var KWHITE = [1, 1, 1];
+
+/* -------------------------------------------------------- matrix helpers */
+function mId() { return new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]); }
+function mMul(a, b) {
+  var o = new Float32Array(16);
+  for (var c = 0; c < 4; c++) for (var r = 0; r < 4; r++) {
+    o[c*4+r] = a[r]*b[c*4] + a[4+r]*b[c*4+1] + a[8+r]*b[c*4+2] + a[12+r]*b[c*4+3];
+  }
+  return o;
+}
+function mTrans(x, y, z) { var m = mId(); m[12] = x; m[13] = y; m[14] = z; return m; }
+function mRotY(a) { var m = mId(), c = Math.cos(a), s = Math.sin(a); m[0]=c; m[2]=-s; m[8]=s; m[10]=c; return m; }
+function mRotX(a) { var m = mId(), c = Math.cos(a), s = Math.sin(a); m[5]=c; m[6]=s; m[9]=-s; m[10]=c; return m; }
+function mRotZ(a) { var m = mId(), c = Math.cos(a), s = Math.sin(a); m[0]=c; m[1]=s; m[4]=-s; m[5]=c; return m; }
+function mPersp(fovy, asp, n, f) {
+  var t = 1 / Math.tan(fovy / 2), m = new Float32Array(16);
+  m[0] = t / asp; m[5] = t; m[10] = (f + n) / (n - f); m[11] = -1; m[14] = 2 * f * n / (n - f);
+  return m;
+}
+function mLook(e, c, u) {
+  var zx = e[0]-c[0], zy = e[1]-c[1], zz = e[2]-c[2];
+  var zl = Math.hypot(zx, zy, zz) || 1; zx/=zl; zy/=zl; zz/=zl;
+  var xx = u[1]*zz - u[2]*zy, xy = u[2]*zx - u[0]*zz, xz = u[0]*zy - u[1]*zx;
+  var xl = Math.hypot(xx, xy, xz) || 1; xx/=xl; xy/=xl; xz/=xl;
+  var yx = zy*xz - zz*xy, yy = zz*xx - zx*xz, yz = zx*xy - zy*xx;
+  var m = new Float32Array(16);
+  m[0]=xx; m[1]=yx; m[2]=zx; m[3]=0;
+  m[4]=xy; m[5]=yy; m[6]=zy; m[7]=0;
+  m[8]=xz; m[9]=yz; m[10]=zz; m[11]=0;
+  m[12]=-(xx*e[0]+xy*e[1]+xz*e[2]);
+  m[13]=-(yx*e[0]+yy*e[1]+yz*e[2]);
+  m[14]=-(zx*e[0]+zy*e[1]+zz*e[2]);
+  m[15]=1;
+  return m;
+}
+function m4Inv(m) {
+  var a00=m[0],a01=m[1],a02=m[2],a03=m[3],a10=m[4],a11=m[5],a12=m[6],a13=m[7],
+      a20=m[8],a21=m[9],a22=m[10],a23=m[11],a30=m[12],a31=m[13],a32=m[14],a33=m[15];
+  var b00=a00*a11-a01*a10, b01=a00*a12-a02*a10, b02=a00*a13-a03*a10,
+      b03=a01*a12-a02*a11, b04=a01*a13-a03*a11, b05=a02*a13-a03*a12,
+      b06=a20*a31-a21*a30, b07=a20*a32-a22*a30, b08=a20*a33-a23*a30,
+      b09=a21*a32-a22*a31, b10=a21*a33-a23*a31, b11=a22*a33-a23*a32;
+  var det = b00*b11-b01*b10+b02*b09+b03*b08-b04*b07+b05*b06;
+  if (!det) return mId();
+  var id = 1 / det, o = new Float32Array(16);
+  o[0]=(a11*b11-a12*b10+a13*b09)*id; o[1]=(a02*b10-a01*b11-a03*b09)*id;
+  o[2]=(a31*b05-a32*b04+a33*b03)*id;  o[3]=(a22*b04-a21*b05-a23*b03)*id;
+  o[4]=(a12*b08-a10*b11-a13*b07)*id;  o[5]=(a00*b11-a02*b08+a03*b07)*id;
+  o[6]=(a32*b02-a30*b05-a33*b01)*id;  o[7]=(a20*b05-a22*b02+a23*b01)*id;
+  o[8]=(a10*b10-a11*b08+a13*b06)*id;  o[9]=(a01*b08-a00*b10-a03*b06)*id;
+  o[10]=(a30*b04-a31*b02+a33*b00)*id; o[11]=(a21*b02-a20*b04-a23*b00)*id;
+  o[12]=(a11*b07-a10*b09-a12*b06)*id; o[13]=(a00*b09-a01*b07+a02*b06)*id;
+  o[14]=(a31*b01-a30*b03-a32*b00)*id; o[15]=(a20*b03-a21*b01+a22*b00)*id;
+  return o;
+}
+
+/* -------------------------------------------------- canvas / text tooling */
+var FONT_CJK = '"Microsoft YaHei","PingFang SC","Hiragino Sans GB","Noto Sans CJK SC","Source Han Sans SC","WenQuanYi Micro Hei",sans-serif';
+var FONT_LAT = '"Arial Black","Helvetica Neue",Arial,sans-serif';
+function mkCanvas(w, h) { var c = document.createElement("canvas"); c.width = w; c.height = h; return c; }
+function rr(c, x, y, w, h, r) {
+  r = Math.min(r, w / 2, h / 2);
+  c.beginPath();
+  c.moveTo(x + r, y); c.lineTo(x + w - r, y); c.quadraticCurveTo(x + w, y, x + w, y + r);
+  c.lineTo(x + w, y + h - r); c.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  c.lineTo(x + r, y + h); c.quadraticCurveTo(x, y + h, x, y + h - r);
+  c.lineTo(x, y + r); c.quadraticCurveTo(x, y, x + r, y); c.closePath();
+}
+
+/* ==========================================================================
+   SIGN ATLAS 1024 x 1024 — all signage is painted here once at boot.
+   ========================================================================== */
+var UV = {
+  fascia:     [0, 1 - 128/1024, 896/1024, 1],
+  fasciaSide: [0, 1 - 256/1024, 512/1024, 1 - 128/1024],
+  vend:       [544/1024, 1 - 512/1024, 800/1024, 1 - 128/1024],
+  coffee:     [800/1024, 1 - 320/1024, 928/1024, 1 - 128/1024],
+  guide:      [0, 1 - 512/1024, 256/1024, 1 - 256/1024],
+  mat:        [256/1024, 1 - 384/1024, 512/1024, 1 - 256/1024],
+  logoFloor:  [512/1024, 1 - 384/1024, 768/1024, 1 - 256/1024],
+  magStrip:   [768/1024, 1 - 416/1024, 1, 1 - 256/1024],
+  accentWall: [0, 1 - 768/1024, 256/1024, 1 - 512/1024],
+  poleKo:     [384/1024, 1 - 640/1024, 512/1024, 1 - 512/1024],
+  poleMa:     [512/1024, 1 - 640/1024, 640/1024, 1 - 512/1024],
+  poleTo:     [640/1024, 1 - 640/1024, 768/1024, 1 - 512/1024],
+  pole24:     [768/1024, 1 - 640/1024, 896/1024, 1 - 512/1024],
+  poleBar:    [896/1024, 1 - 640/1024, 1024/1024, 1 - 512/1024],
+  posterWall: [384/1024, 1 - 768/1024, 640/1024, 1 - 512/1024],
+  asphalt:    [640/1024, 1 - 768/1024, 768/1024, 1 - 640/1024],
+  paving:     [768/1024, 1 - 768/1024, 896/1024, 1 - 640/1024],
+  poster0:    [0, 1 - 960/1024, 128/1024, 1 - 768/1024],
+  poster1:    [128/1024, 1 - 960/1024, 256/1024, 1 - 768/1024],
+  poster2:    [256/1024, 1 - 960/1024, 384/1024, 1 - 768/1024],
+  poster3:    [384/1024, 1 - 960/1024, 512/1024, 1 - 768/1024],
+  poster4:    [512/1024, 1 - 960/1024, 640/1024, 1 - 768/1024],
+  poster5:    [640/1024, 1 - 960/1024, 768/1024, 1 - 768/1024],
+  streetSign: [768/1024, 1 - 1024/1024, 1024/1024, 1 - 960/1024],
+  logo24:     [896/1024, 1 - 768/1024, 1024/1024, 1 - 640/1024]
+};
+
+function drawSignAtlas(cv) {
+  var c = cv.getContext("2d");
+  c.fillStyle = "#f7f9fb"; c.fillRect(0, 0, 1024, 1024);
+
+  /* --- fascia sign 896x128 --- */
+  (function () {
+    var W = 896, H = 128;
+    c.fillStyle = "#fbfdfe"; c.fillRect(0, 0, W, H);
+    c.fillStyle = "#2fa36b"; c.fillRect(0, H - 22, W, 22);
+    c.fillStyle = "#ffb400"; c.fillRect(0, H - 32, W, 10);
+    c.textBaseline = "middle";
+    c.fillStyle = "#1d3b62"; c.font = "700 74px " + FONT_CJK; c.textAlign = "left";
+    c.fillText("ココマート", 34, H * 0.43);
+    c.fillStyle = "#e5484d"; c.font = "700 38px " + FONT_CJK;
+    c.fillText("便利", 470, H * 0.42);
+    c.fillStyle = "#2fa36b"; c.font = "700 24px " + FONT_LAT;
+    c.fillText("OPEN 24 HOURS", 470, H * 0.73);
+    c.fillStyle = "#3d7fd9"; rr(c, 706, 20, 84, 84, 10); c.fill();
+    c.fillStyle = "#ffffff"; c.font = "700 56px " + FONT_LAT; c.textAlign = "center";
+    c.fillText("K", 748, 66);
+  })();
+
+  /* --- side fascia 512x128 --- */
+  (function () {
+    c.save(); c.translate(0, 128);
+    var W = 512, H = 128;
+    c.fillStyle = "#fbfdfe"; c.fillRect(0, 0, W, H);
+    c.fillStyle = "#2fa36b"; c.fillRect(0, H - 22, W, 22);
+    c.fillStyle = "#ffb400"; c.fillRect(0, H - 32, W, 10);
+    c.fillStyle = "#1d3b62"; c.font = "700 66px " + FONT_CJK; c.textBaseline = "middle"; c.textAlign = "left";
+    c.fillText("ココマート", 26, H * 0.42);
+    c.fillStyle = "#e5484d"; c.font = "700 32px " + FONT_CJK; c.fillText("24h", 432, H * 0.42);
+    c.restore();
+  })();
+
+  /* --- vending front 256x384 --- */
+  (function () {
+    c.save(); c.translate(544, 128);
+    var W = 256, H = 384;
+    c.fillStyle = "#eef4fa"; c.fillRect(0, 0, W, H);
+    c.fillStyle = "#2f6fd0"; c.fillRect(0, 0, W, 42);
+    c.fillStyle = "#ffffff"; c.font = "700 22px " + FONT_CJK; c.textAlign = "center"; c.textBaseline = "middle";
+    c.fillText("つめたい 飲料", W / 2, 22);
+    var pal = ["#ff5b5b", "#3fb2ff", "#ffd23f", "#59d68b", "#ff9a3d", "#b48cff"];
+    for (var r = 0; r < 3; r++) for (var k = 0; k < 4; k++) {
+      var x = 12 + k * 60, y = 54 + r * 78;
+      c.fillStyle = "rgba(40,60,90,0.25)"; c.fillRect(x + 3, y + 3, 44, 56);
+      c.fillStyle = pal[(r * 4 + k) % 6]; rr(c, x, y, 44, 56, 6); c.fill();
+      c.fillStyle = "rgba(255,255,255,0.9)"; c.fillRect(x + 7, y + 7, 7, 44);
+      c.fillStyle = "#2a3a52"; c.fillRect(x, y + 56, 44, 16);
+      c.fillStyle = "#ffe36b"; c.font = "700 11px " + FONT_LAT; c.fillText("150", x + 22, y + 64);
+    }
+    c.fillStyle = "#1c2a40"; c.fillRect(0, H - 70, W, 70);
+    c.fillStyle = "#7d90ad"; rr(c, 18, H - 52, 90, 34, 5); c.fill();
+    c.fillStyle = "#2fa36b"; rr(c, 124, H - 52, 30, 34, 5); c.fill();
+    c.fillStyle = "#e5484d"; rr(c, 162, H - 52, 30, 34, 5); c.fill();
+    c.fillStyle = "#dfe8f2"; c.fillRect(0, H - 58, W, 4);
+    c.restore();
+  })();
+
+  /* --- coffee machine front 128x192 --- */
+  (function () {
+    c.save(); c.translate(800, 128);
+    var W = 128, H = 192;
+    c.fillStyle = "#2b2f36"; c.fillRect(0, 0, W, H);
+    c.fillStyle = "#ffd9a0"; rr(c, 8, 8, W - 16, 44, 5); c.fill();
+    c.fillStyle = "#6b3a1c"; c.font = "700 20px " + FONT_LAT; c.textAlign = "center"; c.textBaseline = "middle";
+    c.fillText("COFFEE", W / 2, 31);
+    c.fillStyle = "#8d939b"; rr(c, 18, 62, W - 36, 34, 4); c.fill();
+    c.fillStyle = "#f0f4f8"; rr(c, 26, 68, W - 52, 14, 3); c.fill();
+    c.fillStyle = "#3a1d0e"; c.fillRect(30, 106, W - 60, 30);
+    c.fillStyle = "#f4f7fa"; c.fillRect(40, 140, W - 80, 22);
+    c.fillStyle = "#ff4d4d"; c.beginPath(); c.arc(26, 176, 7, 0, 7); c.fill();
+    c.fillStyle = "#4dff9a"; c.beginPath(); c.arc(52, 176, 7, 0, 7); c.fill();
+    c.fillStyle = "#4da8ff"; c.beginPath(); c.arc(78, 176, 7, 0, 7); c.fill();
+    c.restore();
+  })();
+
+  /* --- floor guide 256x256 --- */
+  (function () {
+    c.save(); c.translate(0, 256);
+    var W = 256, H = 256;
+    c.fillStyle = "#2fa36b"; c.fillRect(0, 0, W, H);
+    c.fillStyle = "#3fbf82"; c.fillRect(10, 10, W - 20, H - 20);
+    c.fillStyle = "#ffffff";
+    c.beginPath(); c.moveTo(128, 28); c.lineTo(178, 104); c.lineTo(78, 104); c.closePath(); c.fill();
+    c.textAlign = "center"; c.textBaseline = "middle";
+    c.font = "700 56px " + FONT_CJK; c.fillText("店内", 128, 168);
+    c.font = "700 26px " + FONT_LAT; c.fillText("AISLE 1-6", 128, 216);
+    c.restore();
+  })();
+
+  /* --- entrance mat 256x128 --- */
+  (function () {
+    c.save(); c.translate(256, 256);
+    var W = 256, H = 128;
+    c.fillStyle = "#2d6aa8"; c.fillRect(0, 0, W, H);
+    for (var x = 0; x < W; x += 10) { c.fillStyle = "rgba(255,255,255,0.05)"; c.fillRect(x, 0, 5, H); }
+    c.strokeStyle = "#bfe0ff"; c.lineWidth = 7; c.strokeRect(9, 9, W - 18, H - 18);
+    c.fillStyle = "#ffffff"; c.textAlign = "center"; c.textBaseline = "middle";
+    c.font = "700 50px " + FONT_CJK; c.fillText("傘", W * 0.22, H * 0.48);
+    c.font = "700 30px " + FONT_CJK; c.fillText("お忘れなく", W * 0.63, H * 0.5);
+    c.restore();
+  })();
+
+  /* --- logo floor mat 256x128 --- */
+  (function () {
+    c.save(); c.translate(512, 256);
+    var W = 256, H = 128;
+    c.fillStyle = "#3f4a5c"; c.fillRect(0, 0, W, H);
+    c.strokeStyle = "#93a7c1"; c.lineWidth = 9; c.strokeRect(10, 10, W - 20, H - 20);
+    c.fillStyle = "#2fa36b"; rr(c, 26, 20, W - 52, H - 40, 18); c.fill();
+    c.fillStyle = "#ffffff"; c.textAlign = "center"; c.textBaseline = "middle";
+    c.font = "700 50px " + FONT_CJK; c.fillText("ココ", W / 2, H * 0.36);
+    c.font = "700 24px " + FONT_LAT; c.fillText("KOKOMART", W / 2, H * 0.76);
+    c.restore();
+  })();
+
+  /* --- magazine strip 256x160 --- */
+  (function () {
+    c.save(); c.translate(768, 256);
+    var W = 256, H = 160, r = rng(77);
+    var pal = ["#ff9aa2", "#ffd39a", "#a8e6a1", "#9ad4ff", "#c9b3ff", "#ffb3d9", "#fff09a", "#9ae6dc"];
+    c.fillStyle = "#cfd5dd"; c.fillRect(0, 0, W, H);
+    for (var i = 0; i < 14; i++) {
+      var x = i * (W / 14), w = W / 14 - 3;
+      c.fillStyle = pal[i % 8]; c.fillRect(x + 1.5, 3, w, H - 6);
+      c.fillStyle = "rgba(255,255,255,0.93)"; c.fillRect(x + 4, 9, w - 6, H * 0.4);
+      c.fillStyle = "rgba(30,40,60,0.7)";
+      for (var k = 0; k < 5; k++) c.fillRect(x + 4, H * 0.58 + k * (H * 0.07), w - 8 - r() * 7, H * 0.028);
+    }
+    c.restore();
+  })();
+
+  /* --- accent wall 256x256 --- */
+  (function () {
+    c.save(); c.translate(0, 512);
+    var W = 256, H = 256;
+    c.fillStyle = "#f3ecdd"; c.fillRect(0, 0, W, H);
+    c.fillStyle = "#ece1ca"; for (var y = 0; y < H; y += 20) c.fillRect(0, y, W, 4);
+    c.fillStyle = "#d9c9ab"; c.fillRect(0, H - 34, W, 34);
+    c.fillStyle = "#c8b696"; c.fillRect(0, H - 38, W, 6);
+    c.restore();
+  })();
+
+  /* --- vertical pole-sign glyph tiles 128x128 --- */
+  function glyph(gx, gy, ch, bg, fg, size) {
+    c.save(); c.translate(gx, gy);
+    c.fillStyle = bg; c.fillRect(0, 0, 128, 128);
+    c.fillStyle = fg; c.textAlign = "center"; c.textBaseline = "middle";
+    c.font = "700 " + (size || 88) + "px " + FONT_CJK; c.fillText(ch, 64, 70);
+    c.restore();
+  }
+  glyph(384, 512, "コ", "#f6fafd", "#1d3b62");
+  glyph(512, 512, "マ", "#f6fafd", "#1d3b62");
+  glyph(640, 512, "ー", "#f6fafd", "#1d3b62");
+  glyph(768, 512, "ト", "#f6fafd", "#1d3b62");
+  glyph(896, 512, "24", "#e5484d", "#ffffff", 62);
+
+  /* --- notice board 256x256 --- */
+  (function () {
+    c.save(); c.translate(384, 512);
+    var W = 256, H = 256, r = rng(4242);
+    c.fillStyle = "#3d4557"; c.fillRect(0, 0, W, H);
+    c.fillStyle = "#c7b183"; c.fillRect(8, 8, W - 16, H - 16);
+    var pal = ["#ffe0b0", "#cfe9ff", "#ffd0d6", "#d8ffe0", "#fff3c4"];
+    for (var f = 0; f < 6; f++) {
+      var x = 16 + (f % 2) * 118 + r() * 8, y = 16 + Math.floor(f / 2) * 80;
+      c.save(); c.translate(x + 50, y + 34); c.rotate((r() - 0.5) * 0.12);
+      c.fillStyle = pal[f % 5]; c.fillRect(-48, -30, 96, 62);
+      c.fillStyle = "rgba(40,60,90,0.75)";
+      for (var k = 0; k < 3; k++) c.fillRect(-38, -16 + k * 13, 40 + r() * 40, 5);
+      c.restore();
+    }
+    c.restore();
+  })();
+
+  /* --- asphalt 128x128 --- */
+  (function () {
+    c.save(); c.translate(640, 640);
+    var r = rng(9);
+    c.fillStyle = "#4a4f5c"; c.fillRect(0, 0, 128, 128);
+    for (var i = 0; i < 420; i++) {
+      var v = 0.75 + r() * 0.5;
+      c.fillStyle = "rgba(" + Math.round(92 * v) + "," + Math.round(98 * v) + "," + Math.round(114 * v) + ",0.9)";
+      c.fillRect(r() * 128, r() * 128, 4, 3);
+    }
+    c.restore();
+  })();
+
+  /* --- paving 128x128 --- */
+  (function () {
+    c.save(); c.translate(768, 640);
+    var r = rng(31);
+    c.fillStyle = "#9d9890"; c.fillRect(0, 0, 128, 128);
+    for (var i = 0; i < 200; i++) {
+      var v = 0.85 + r() * 0.3;
+      c.fillStyle = "rgba(" + Math.round(160 * v) + "," + Math.round(155 * v) + "," + Math.round(146 * v) + ",0.9)";
+      c.fillRect(r() * 128, r() * 128, 6, 4);
+    }
+    c.strokeStyle = "rgba(92,88,84,0.95)"; c.lineWidth = 3;
+    c.strokeRect(1.5, 1.5, 125, 125);
+    c.beginPath(); c.moveTo(0, 64); c.lineTo(128, 64); c.stroke();
+    c.restore();
+  })();
+
+  /* --- six product posters 128x192 --- */
+  var defs = [
+    { bg: "#ffe8c6", band: "#ff9a6b", t1: "新発売", t2: "あたたかい弁当", tc: "#2b4a6f", ac: "#e86a5a", sh: "sun" },
+    { bg: "#dff1ff", band: "#2f9fe0", t1: "COFFEE", t2: "冷たい 飲料", tc: "#1a3c63", ac: "#ffcf3f", sh: "cans" },
+    { bg: "#fff6e3", band: "#ffb400", t1: "ポイント", t2: "5倍 キャンペーン", tc: "#b0342b", ac: "#e5484d", sh: "circle" },
+    { bg: "#f1fff4", band: "#2fa36b", t1: "おにぎり", t2: "全品 130円", tc: "#1d3b62", ac: "#26493c", sh: "tri" },
+    { bg: "#fff1e6", band: "#ff5a3c", t1: "おでん", t2: "はじめました", tc: "#7a2a1e", ac: "#ffc14d", sh: "circle" },
+    { bg: "#eef4ff", band: "#3d7fd9", t1: "ATM", t2: "24時間 営業", tc: "#1d3b62", ac: "#9ef0c0", sh: "square" }
+  ];
+  for (var pi = 0; pi < 6; pi++) {
+    var d = defs[pi];
+    c.save(); c.translate(pi * 128, 768);
+    c.fillStyle = d.bg; c.fillRect(0, 0, 128, 192);
+    c.fillStyle = d.band; c.fillRect(0, 0, 128, 58);
+    c.fillStyle = d.ac;
+    if (d.sh === "sun") { c.beginPath(); c.arc(98, 30, 20, 0, 7); c.fill(); }
+    else if (d.sh === "circle") { c.beginPath(); c.arc(64, 106, 30, 0, 7); c.fill(); }
+    else if (d.sh === "tri") { c.beginPath(); c.moveTo(64, 78); c.lineTo(100, 136); c.lineTo(28, 136); c.closePath(); c.fill(); }
+    else if (d.sh === "square") { rr(c, 44, 84, 40, 34, 5); c.fill(); }
+    else if (d.sh === "cans") {
+      for (var q = 0; q < 3; q++) { c.fillStyle = ["#ffcf3f", "#ff6b6b", "#7fd47f"][q]; rr(c, 30 + q * 26, 74, 20, 44, 4); c.fill(); }
+    }
+    c.fillStyle = d.tc; c.textAlign = "center"; c.textBaseline = "middle";
+    c.font = "700 " + (d.sh === "cans" ? 24 : 30) + "px " + (d.sh === "cans" ? FONT_LAT : FONT_CJK);
+    c.fillText(d.t1, 64, 30);
+    c.font = "700 16px " + FONT_CJK; c.fillText(d.t2, 64, 158);
+    c.fillStyle = d.band; c.fillRect(0, 178, 128, 14);
+    c.restore();
+  }
+
+  /* --- street name sign 256x64 --- */
+  (function () {
+    c.save(); c.translate(768, 960);
+    var W = 256, H = 64;
+    c.fillStyle = "#2f6fd0"; c.fillRect(0, 0, W, H);
+    c.strokeStyle = "#ffffff"; c.lineWidth = 3; c.strokeRect(4, 4, W - 8, H - 8);
+    c.fillStyle = "#ffffff"; c.textAlign = "center"; c.textBaseline = "middle";
+    c.font = "700 28px " + FONT_CJK; c.fillText("ココロ町 二丁目", 118, 34);
+    c.font = "700 15px " + FONT_LAT; c.fillText("2", 232, 34);
+    c.restore();
+  })();
+
+  /* --- 24h strip 128x128 --- */
+  (function () {
+    c.save(); c.translate(896, 640);
+    c.fillStyle = "#1d6b46"; c.fillRect(0, 0, 128, 128);
+    c.fillStyle = "#ffffff"; c.textAlign = "center"; c.textBaseline = "middle";
+    c.font = "700 52px " + FONT_LAT; c.fillText("24H", 64, 64);
+    c.restore();
+  })();
+}
+/* @@PART1END@@ */
+
+/* @@PART2@@ */
+/* ==========================================================================
+   MESH BUILDER
+   One interleaved vertex buffer + index buffer for all opaque geometry.
+   Vertex layout (STR floats): pos3 | nrm3 | uv2 | col3 | mat1 | emis3 | glow1
+   ========================================================================== */
+var STR = 16;
+var gP = [], gN = [], gU = [], gC = [], gM = [], gE = [], gG = [];
+var idx = [];
+var vcount = 0;
+
+var MAT = { STD: 0, ROAD: 1, WALK: 2, GLASS: 3, FOLIAGE: 4, SKY: 5, SIGN: 6, LIT: 7, PANEL: 8, MAG: 9 };
+
+function vpush(p, n, u, c, mat, e, glow) {
+  gP.push(p[0], p[1], p[2]);
+  gN.push(n[0], n[1], n[2]);
+  gU.push(u[0], u[1]);
+  gC.push(c[0], c[1], c[2]);
+  gM.push(mat);
+  gE.push(e[0], e[1], e[2]);
+  gG.push(glow);
+  return vcount++;
+}
+function quad(p0, p1, p2, p3, n, c, mat, em, uv) {
+  var u0 = uv ? uv[0] : 0, v0 = uv ? uv[1] : 0, u1 = uv ? uv[2] : 1, v1 = uv ? uv[3] : 1;
+  var e = em ? [em[0], em[1], em[2]] : [0, 0, 0];
+  var glow = em ? (em[3] === undefined ? 1 : em[3]) : 0;
+  var a = vpush(p0, n, [u0, v1], c, mat, e, glow);
+  var b = vpush(p1, n, [u1, v1], c, mat, e, glow);
+  var d = vpush(p2, n, [u1, v0], c, mat, e, glow);
+  var f = vpush(p3, n, [u0, v0], c, mat, e, glow);
+  idx.push(a, b, d, a, d, f);
+  return [a, b, d, f];
+}
+function tri(p0, p1, p2, n, c, mat, em) {
+  var e = em ? [em[0], em[1], em[2]] : [0, 0, 0];
+  var glow = em ? (em[3] === undefined ? 1 : em[3]) : 0;
+  var a = vpush(p0, n, [0, 0], c, mat, e, glow);
+  var b = vpush(p1, n, [1, 0], c, mat, e, glow);
+  var d = vpush(p2, n, [0.5, 1], c, mat, e, glow);
+  idx.push(a, b, d);
+  return [a, b, d];
+}
+function applyM(M, p) {
+  if (!M) return p;
+  return [M[0]*p[0] + M[4]*p[1] + M[8]*p[2] + M[12],
+          M[1]*p[0] + M[5]*p[1] + M[9]*p[2] + M[13],
+          M[2]*p[0] + M[6]*p[1] + M[10]*p[2] + M[14]];
+}
+function applyV(M, p) {
+  if (!M) return p;
+  return [M[0]*p[0] + M[4]*p[1] + M[8]*p[2],
+          M[1]*p[0] + M[5]*p[1] + M[9]*p[2],
+          M[2]*p[0] + M[6]*p[1] + M[10]*p[2]];
+}
+/* axis-aligned box; `skip` is a space separated list: x0 x1 y0 y1 z0 z1 */
+function box(M, x0, x1, y0, y1, z0, z1, c, mat, em, skip, uv) {
+  mat = (mat === undefined) ? MAT.STD : mat;
+  if (x0 > x1) { var t = x0; x0 = x1; x1 = t; }
+  if (y0 > y1) { var t2 = y0; y0 = y1; y1 = t2; }
+  if (z0 > z1) { var t3 = z0; z0 = z1; z1 = t3; }
+  skip = skip || "";
+  var n;
+  if (skip.indexOf("x0") < 0) {
+    n = applyV(M, [-1, 0, 0]);
+    quad(applyM(M, [x0, y0, z1]), applyM(M, [x0, y0, z0]), applyM(M, [x0, y1, z0]), applyM(M, [x0, y1, z1]), n, c, mat, em, uv);
+  }
+  if (skip.indexOf("x1") < 0) {
+    n = applyV(M, [1, 0, 0]);
+    quad(applyM(M, [x1, y0, z0]), applyM(M, [x1, y0, z1]), applyM(M, [x1, y1, z1]), applyM(M, [x1, y1, z0]), n, c, mat, em, uv);
+  }
+  if (skip.indexOf("z0") < 0) {
+    n = applyV(M, [0, 0, -1]);
+    quad(applyM(M, [x1, y0, z0]), applyM(M, [x0, y0, z0]), applyM(M, [x0, y1, z0]), applyM(M, [x1, y1, z0]), n, c, mat, em, uv);
+  }
+  if (skip.indexOf("z1") < 0) {
+    n = applyV(M, [0, 0, 1]);
+    quad(applyM(M, [x0, y0, z1]), applyM(M, [x1, y0, z1]), applyM(M, [x1, y1, z1]), applyM(M, [x0, y1, z1]), n, c, mat, em, uv);
+  }
+  if (skip.indexOf("y0") < 0) {
+    n = applyV(M, [0, -1, 0]);
+    quad(applyM(M, [x0, y0, z0]), applyM(M, [x1, y0, z0]), applyM(M, [x1, y0, z1]), applyM(M, [x0, y0, z1]), n, c, mat, em, uv);
+  }
+  if (skip.indexOf("y1") < 0) {
+    n = applyV(M, [0, 1, 0]);
+    quad(applyM(M, [x0, y1, z0]), applyM(M, [x1, y1, z0]), applyM(M, [x1, y1, z1]), applyM(M, [x0, y1, z1]), n, c, mat, em, uv);
+  }
+}
+/* cylinder / tube from (cx,cy,cz) upward by h; M rotates it into place */
+var CYLN = 20;
+function cyl(M, cx, cy, cz, r, h, c, mat, em, rTop, noCaps) {
+  mat = (mat === undefined) ? MAT.STD : mat;
+  rTop = (rTop === undefined) ? r : rTop;
+  var n = CYLN, i;
+  for (i = 0; i < n; i++) {
+    var a0 = i / n * PI * 2, a1 = (i + 1) / n * PI * 2;
+    var c0 = Math.cos(a0), s0 = Math.sin(a0), c1 = Math.cos(a1), s1 = Math.sin(a1);
+    var n0 = applyV(M, [c0, 0, s0]), n1 = applyV(M, [c1, 0, s1]);
+    var p0 = applyM(M, [cx + c0 * r, cy, cz + s0 * r]), p1 = applyM(M, [cx + c1 * r, cy, cz + s1 * r]);
+    var q0 = applyM(M, [cx + c0 * rTop, cy + h, cz + s0 * rTop]), q1 = applyM(M, [cx + c1 * rTop, cy + h, cz + s1 * rTop]);
+    quad(p0, p1, q1, q0, n0, c, mat, em);
+    if (!noCaps) {
+      tri(applyM(M, [cx, cy + h, cz]), q0, q1, applyV(M, [0, 1, 0]), c, mat, em);
+      tri(applyM(M, [cx, cy, cz]), p1, p0, applyV(M, [0, -1, 0]), c, mat, em);
+    }
+  }
+}
+function beam(M, ax, az, bx, bz, y, w, h, c, mat, em) {
+  var dx = bx - ax, dz = bz - az, L = Math.hypot(dx, dz) || 0.001;
+  var yaw = Math.atan2(dx, dz);
+  var MM = mMul(M || mId(), mMul(mTrans((ax + bx) / 2, y, (az + bz) / 2), mRotY(yaw)));
+  box(MM, -w / 2, w / 2, 0, h, -L / 2, L / 2, c, mat || MAT.STD, em);
+}
+function cable(p0, p1, sag, r, c) {
+  var n = 10;
+  for (var i = 0; i < n; i++) {
+    var s0 = i / n, s1 = (i + 1) / n;
+    var a = [p0[0] + (p1[0]-p0[0])*s0, p0[1] + (p1[1]-p0[1])*s0 - sag*4*s0*(1-s0), p0[2] + (p1[2]-p0[2])*s0];
+    var b = [p0[0] + (p1[0]-p0[0])*s1, p0[1] + (p1[1]-p0[1])*s1 - sag*4*s1*(1-s1), p0[2] + (p1[2]-p0[2])*s1];
+    var dx = b[0]-a[0], dy = b[1]-a[1], dz = b[2]-a[2];
+    var L = Math.hypot(dx, dy, dz) || 0.001;
+    var yaw = Math.atan2(dx, dz), pitch = Math.asin(clamp(dy / L, -1, 1));
+    var M = mMul(mTrans((a[0]+b[0])/2, (a[1]+b[1])/2, (a[2]+b[2])/2), mMul(mRotY(yaw), mRotX(-pitch)));
+    box(M, -r, r, -r, r, -L/2, L/2, c, MAT.STD);
+  }
+}
+/* textured panel: origin p, edge u, edge v, uv region name from UV[] */
+function panel(p, u, v, uvName, c, glow, mat) {
+  var uv = UV[uvName];
+  var P1 = [p[0]+u[0], p[1]+u[1], p[2]+u[2]];
+  var P2 = [p[0]+u[0]+v[0], p[1]+u[1]+v[1], p[2]+u[2]+v[2]];
+  var P3 = [p[0]+v[0], p[1]+v[1], p[2]+v[2]];
+  var nx = u[1]*v[2]-u[2]*v[1], ny = u[2]*v[0]-u[0]*v[2], nz = u[0]*v[1]-u[1]*v[0];
+  var l = Math.hypot(nx, ny, nz) || 1;
+  var n = [nx/l, ny/l, nz/l];
+  var em = c ? [c[0], c[1], c[2], glow === undefined ? 1 : glow] : null;
+  return quad(p, P1, P2, P3, n, KWHITE, (mat === undefined) ? MAT.SIGN : mat, em, uv);
+}
+
+/* ==========================================================================
+   SCENE
+   ========================================================================== */
+var PUDDLES = [];
+var PUD_GEO = new Float32Array(48);
+var LAMP_SPEC = [];
+
+function buildScene() {
+  buildBase();
+  buildGround();
+  buildStore();
+  buildInterior();
+  buildForecourt();
+  buildSurroundings();
+  buildSky();
+  finalizePuddles();
+  buildOutsideLayer();
+}
+
+/* --------------------------------------------------------------- the plinth */
+function buildBase() {
+  var B = 20.0;
+  box(null, -B - 0.45, B + 0.45, -5.2, -0.95, -B - 0.45, B + 0.45, C.baseSide, MAT.STD, null, "y0");
+  box(null, -B - 0.30, B + 0.30, -0.95, -0.70, -B - 0.30, B + 0.30, C.baseTrim, MAT.STD, null, "y1");
+  box(null, -B - 0.18, B + 0.18, -0.70, -0.58, -B - 0.18, B + 0.18, C.baseTop, MAT.STD, null, "y1");
+  box(null, -B - 0.47, B + 0.47, -4.92, -4.84, -B - 0.47, B + 0.47, col("#6b5a3c"), MAT.STD, [0.04, 0.03, 0.015], "y1");
+}
+
+/* ----------------------------------------------------------------- ground */
+function buildGround() {
+  var B = 20.0;
+  box(null, -B, B, -0.6, 0, -B, B, C.asphalt, MAT.ROAD, null, "y0");
+
+  /* centre dashes */
+  for (var x = -19; x < 18.6; x += 4.4) box(null, x, x + 2.2, 0.004, 0.014, -14.86, -14.14, C.paint, MAT.ROAD);
+  for (var z = -8; z < 18.6; z += 4.4) box(null, -14.86, -14.14, 0.004, 0.014, z, z + 2.2, C.paint, MAT.ROAD);
+  /* stop lines */
+  box(null, -8.6, -6.0, 0.004, 0.014, -19.6, -18.8, C.paint, MAT.ROAD);
+  box(null, -19.6, -18.8, 0.004, 0.014, -8.6, -6.0, C.paint, MAT.ROAD);
+  /* zebra across the E-W road */
+  for (var i = 0; i < 8; i++) {
+    var z0 = -19.2 + i * 1.24;
+    box(null, -4.6, 1.4, 0.005, 0.015, z0, z0 + 0.64, C.paint, MAT.ROAD);
+  }
+  /* zebra across the N-S road */
+  for (var j = 0; j < 8; j++) {
+    var x0 = -19.2 + j * 1.24;
+    box(null, x0, x0 + 0.64, 0.005, 0.015, -1.6, 4.4, C.paint, MAT.ROAD);
+  }
+  box(null, -5.0, 1.8, 0.004, 0.012, -9.95, -9.3, C.paint, MAT.ROAD);
+  box(null, -9.95, -9.3, 0.004, 0.012, -2.0, 4.8, C.paint, MAT.ROAD);
+  box(null, -9.4, 19.9, 0.004, 0.012, 8.42, 8.52, col("#e4e7ea"), MAT.ROAD);
+  /* manholes */
+  cyl(null, -2.0, 0.004, -11.6, 0.62, 0.012, col("#2c313a"), MAT.ROAD);
+  cyl(null, -12.6, 0.004, 11.4, 0.55, 0.012, col("#2c313a"), MAT.ROAD);
+  cyl(null, 12.4, 0.004, -12.2, 0.5, 0.012, col("#2c313a"), MAT.ROAD);
+  cyl(null, 6.2, 0.004, -16.4, 0.5, 0.012, col("#2c313a"), MAT.ROAD);
+  /* curb drains */
+  for (var d = 0; d < 4; d++) {
+    var gx = 1.6 + d * 4.6;
+    box(null, gx, gx + 1.3, 0.004, 0.02, 8.1, 8.5, col("#20242b"), MAT.STD);
+    for (var b = 0; b < 5; b++) box(null, gx + 0.08 + b * 0.25, gx + 0.18 + b * 0.25, 0.02, 0.028, 8.14, 8.46, col("#454c58"), MAT.STD);
+  }
+  for (var d2 = 0; d2 < 3; d2++) {
+    var gz = -4.0 + d2 * 6.0;
+    box(null, -9.46, -9.05, 0.004, 0.02, gz, gz + 1.3, col("#20242b"), MAT.STD);
+  }
+  /* sidewalks */
+  box(null, -9.4, 20.0, 0, 0.34, 8.6, 20.0, C.walk, MAT.WALK, null, "y0");
+  box(null, -9.4, -9.0, 0, 0.34, -9.0, 8.6, C.walk, MAT.WALK, null, "y0");
+  box(null, -9.0, 20.0, 0, 0.30, -20.0, -19.2, C.walk, MAT.WALK, null, "y0");
+  /* kerbs */
+  box(null, -9.4, 20.0, 0, 0.36, 8.52, 8.62, C.curb, MAT.STD);
+  box(null, -9.46, -9.36, 0, 0.36, -9.0, 8.52, C.curb, MAT.STD);
+  box(null, -9.0, 20.0, 0, 0.32, -19.26, -19.16, C.curb, MAT.STD);
+  /* tactile paving towards the crossing */
+  for (var t = 0; t < 14; t++) box(null, -4.5 + t * 0.44, -4.22 + t * 0.44, 0.34, 0.355, 8.05, 8.5, C.paintY, MAT.WALK);
+  /* sidewalk joints */
+  for (var k = 0; k < 16; k++) box(null, -9.4 + k * 1.85, -9.36 + k * 1.85, 0.34, 0.345, 8.6, 20.0, col("#7e7972"), MAT.WALK);
+}
+
+/* --------------------------------------------------------- the convenience */
+var STORE = { x0: -6, x1: 8, z0: -8.6, z1: 3.6, h: 6.6, gz: 3.74 };
+var DOOR = { range: [0, 0], orig: null, phase: -1, next: 6.0, amount: 0 };
+
+function buildStore() {
+  var x0 = STORE.x0, x1 = STORE.x1, z0 = STORE.z0, z1 = STORE.z1, H = STORE.h, gz = STORE.gz;
+
+  /* floor slab + in-store floor */
+  box(null, x0, x1, 0.30, 0.52, z0, z1, col("#e4dfd4"), MAT.STD, null, "y0");
+  box(null, x0 + 0.06, x1 - 0.06, 0.52, 0.535, z0 + 0.04, z1 - 0.02, col("#f2eee5"), MAT.WALK);
+  box(null, -1.75, 1.75, 0.30, 0.50, z1, z1 + 0.95, col("#b7b2a9"), MAT.STD);
+
+  /* shell */
+  box(null, x0 - 0.3, x1 + 0.3, 0.30, H, z0 - 0.34, z0, C.wall, MAT.STD);
+  box(null, x0 - 0.34, x0, 0.30, H, z0, z1 + 0.28, C.wall, MAT.STD);
+  box(null, x1, x1 + 0.34, 0.30, H, z0, z1 + 0.28, C.wall, MAT.STD);
+  box(null, x0 - 0.34, x1 + 0.34, 4.42, H, z1, z1 + 0.28, C.wall, MAT.STD);
+  box(null, x0 - 0.34, x1 + 0.34, 0.30, 0.66, z1, z1 + 0.28, C.concrete, MAT.STD);
+  /* inner linings */
+  box(null, x0 + 0.005, x0 + 0.04, 0.52, H, z0 + 0.02, z1, col("#f6f0e4"), MAT.STD, null, "x0");
+  box(null, x0, x1, 0.52, H, z0 + 0.005, z0 + 0.04, col("#f6f0e4"), MAT.STD, null, "z0");
+  box(null, x1 - 0.04, x1 - 0.005, 0.52, H, z0 + 0.02, z1, col("#f6f0e4"), MAT.STD, null, "x1");
+
+  /* roof + parapet */
+  box(null, x0 - 0.4, x1 + 0.4, H, H + 0.22, z0 - 0.44, z1 + 0.38, C.roof, MAT.STD);
+  box(null, x0 - 0.4, x1 + 0.4, H + 0.22, H + 0.44, z0 - 0.5, z0 - 0.34, C.roofDark, MAT.STD);
+  box(null, x0 - 0.5, x0 - 0.34, H + 0.22, H + 0.44, z0 - 0.5, z1 + 0.34, C.roofDark, MAT.STD);
+  box(null, x1 + 0.34, x1 + 0.5, H + 0.22, H + 0.44, z0 - 0.5, z1 + 0.34, C.roofDark, MAT.STD);
+  box(null, x0 - 0.42, x1 + 0.42, H + 0.44, H + 0.5, z1 + 0.14, z1 + 0.36, C.wallShade, MAT.STD);
+
+  /* storefront mullions */
+  for (var mx = x0; mx <= x1 + 0.001; mx += 1.4) {
+    box(null, mx - 0.065, mx + 0.065, 0.66, 4.42, gz - 0.07, gz + 0.07, C.metal, MAT.STD);
+  }
+  box(null, x0, x1, 4.30, 4.42, gz - 0.09, gz + 0.09, C.metal, MAT.STD);
+  box(null, x0, x1, 0.66, 0.78, gz - 0.09, gz + 0.09, C.metal, MAT.STD);
+  /* glass panes around the door bay */
+  function pane(px0, px1) {
+    if (px1 - px0 < 0.1) return;
+    quad([px0, 0.78, gz], [px1, 0.78, gz], [px1, 4.30, gz], [px0, 4.30, gz], [0, 0, 1], KWHITE, MAT.GLASS, [0.02, 0.05, 0.07]);
+  }
+  pane(x0, -1.72); pane(1.72, x1);
+
+  /* east return window (faces +X) */
+  box(null, x1 + 0.34, x1 + 0.5, 0.66, 0.80, 0.2, 3.5, C.metal, MAT.STD);
+  box(null, x1 + 0.34, x1 + 0.5, 4.30, 4.42, 0.2, 3.5, C.metal, MAT.STD);
+  box(null, x1 + 0.34, x1 + 0.5, 0.66, 4.42, 0.14, 0.28, C.metal, MAT.STD);
+  box(null, x1 + 0.34, x1 + 0.5, 0.66, 4.42, 3.42, 3.56, C.metal, MAT.STD);
+  box(null, x1 + 0.34, x1 + 0.5, 0.66, 4.42, 1.80, 1.90, C.metal, MAT.STD);
+  box(null, x1, x1 + 0.34, 0.30, 0.66, 0.14, 3.56, C.concrete, MAT.STD);
+  quad([x1 + 0.52, 0.80, 3.5], [x1 + 0.52, 0.80, 0.28], [x1 + 0.52, 4.30, 0.28], [x1 + 0.52, 4.30, 3.5], [1, 0, 0], KWHITE, MAT.GLASS, [0.02, 0.05, 0.07]);
+
+  /* automatic sliding doors */
+  buildSlidingDoor(gz);
+
+  /* canopy */
+  var cz0 = z1 + 0.1, cz1 = 6.95;
+  box(null, x0 - 0.3, x1 + 0.42, 5.02, 5.22, cz0, cz1, C.green, MAT.STD, [0.03, 0.12, 0.08]);
+  box(null, x0 - 0.3, x1 + 0.42, 4.86, 5.02, cz1, cz1 + 0.26, C.greenDark, MAT.STD);
+  for (var ax = x0 - 0.15; ax < x1 + 0.42; ax += 1.9) {
+    box(null, ax, ax + 0.1, 5.22, 5.3, cz0 + 0.05, cz1 + 0.2, C.white, MAT.STD);
+  }
+  for (var ax2 = x0 + 0.6; ax2 < x1; ax2 += 2.2) {
+    box(null, ax2 - 0.16, ax2 + 0.16, 4.98, 5.03, 5.4, 5.72, col("#fff6e4"), MAT.LIT, [1.0, 0.92, 0.76]);
+  }
+  box(null, x1 + 0.34, x1 + 1.5, 4.95, 5.1, 0.2, 3.6, C.green, MAT.STD, [0.03, 0.12, 0.08]);
+  box(null, x1 + 1.42, x1 + 1.52, 4.8, 4.95, 0.2, 3.6, C.greenDark, MAT.STD);
+
+  /* fascia sign */
+  box(null, x0 + 0.2, x1 - 0.2, 5.32, 6.5, z1 + 0.22, z1 + 0.3, C.white, MAT.STD);
+  panel([x0 + 0.25, 5.36, z1 + 0.305], [x1 - x0 - 0.5, 0, 0], [0, 1.08, 0], "fascia", [1.0, 1.0, 1.0], 1.0);
+  box(null, x0 + 0.2, x1 - 0.2, 6.5, 6.56, z1 + 0.2, z1 + 0.34, C.green, MAT.STD);
+  box(null, x0 - 0.46, x0 - 0.34, 5.3, 6.3, z0 + 0.4, z1 - 1.2, C.white, MAT.STD);
+  panel([x0 - 0.47, 5.34, z1 - 1.25], [0, 0, -(z1 - 1.25 - (z0 + 0.4))], [0, 0.92, 0], "fasciaSide", [0.95, 0.95, 0.95], 1.0);
+  cyl(null, x0 - 0.4, 0.34, z0 + 0.6, 0.09, 6.2, C.concreteDark, MAT.STD);
+
+  /* vertical pole sign */
+  (function () {
+    var px = 9.9, pz = 5.6;
+    cyl(null, px, 0.34, pz, 0.18, 9.6, C.poleDark, MAT.STD);
+    cyl(null, px, 0.34, pz, 0.34, 0.4, col("#474d5a"), MAT.STD);
+    box(null, px - 0.82, px + 0.82, 6.3, 9.55, pz - 0.22, pz + 0.22, C.white, MAT.STD);
+    box(null, px - 0.86, px + 0.86, 9.55, 9.75, pz - 0.26, pz + 0.26, C.green, MAT.STD, [0.05, 0.18, 0.12]);
+    box(null, px - 0.86, px + 0.86, 6.08, 6.3, pz - 0.26, pz + 0.26, C.green, MAT.STD, [0.05, 0.18, 0.12]);
+    var tiles = ["poleKo", "poleKo", "poleMa", "poleTo"];
+    for (var i = 0; i < 4; i++) {
+      var yb = 8.98 - i * 0.66, yt = yb + 0.62;
+      panel([px - 0.68, yb, pz + 0.226], [1.36, 0, 0], [0, yt - yb, 0], tiles[i], [1, 1, 1], 1.0);
+      panel([px + 0.68, yb, pz - 0.226], [-1.36, 0, 0], [0, yt - yb, 0], tiles[i], [1, 1, 1], 1.0);
+    }
+    panel([px - 0.42, 6.34, pz + 0.226], [0.84, 0, 0], [0, 0.84, 0], "poleBar", [1, 1, 1], 1.0);
+    panel([px + 0.42, 6.34, pz - 0.226], [-0.84, 0, 0], [0, 0.84, 0], "poleBar", [1, 1, 1], 1.0);
+    LAMP_SPEC.push({ p: [px, 8.2, pz + 0.9], c: [0.55, 0.95, 0.7], r: 14, kind: 1 });
+  })();
+
+  /* roof plant */
+  box(null, -3.0, 0.6, H + 0.22, H + 1.12, -6.9, -4.4, C.metalDark, MAT.STD);
+  cyl(null, -1.2, H + 1.12, -5.65, 1.55, 0.12, C.metal, MAT.STD);
+  cyl(null, -1.2, H + 0.22, -5.65, 0.22, 0.9, C.metal, MAT.STD);
+  for (var rv = 0; rv < 5; rv++) box(null, -1.5 + rv * 0.28, -1.36 + rv * 0.28, H + 1.12, H + 1.2, -7.1, -4.2, C.steel, MAT.STD);
+  box(null, 3.0, 6.6, H + 0.22, H + 0.55, -7.8, -4.6, C.metal, MAT.STD);
+  for (var pv = 0; pv < 4; pv++) {
+    var pzz = -7.5 + pv * 0.76;
+    quad([3.1, H + 0.56, pzz], [6.5, H + 0.56, pzz], [6.5, H + 0.56, pzz + 0.64], [3.1, H + 0.56, pzz + 0.64],
+         [0, 1, 0], col("#22345a"), MAT.STD, [0.02, 0.04, 0.08]);
+  }
+  cyl(null, 7.2, H + 0.22, -7.8, 0.24, 1.5, C.metal, MAT.STD);
+  cyl(null, 7.2, H + 1.72, -7.8, 0.36, 0.3, C.metalDark, MAT.STD);
+
+  /* exterior AC units, pipes, notice board */
+  box(null, x1 + 0.34, x1 + 1.16, 0.6, 1.9, -6.6, -5.1, col("#d7dbe1"), MAT.STD);
+  cyl(mMul(mTrans(x1 + 1.18, 1.24, -5.85), mRotY(PI / 2)), 0, 0, -0.02, 0.06, 0.46, col("#8b929b"), MAT.STD);
+  box(null, x1 + 0.34, x1 + 1.16, 0.6, 1.9, -4.4, -2.9, col("#d7dbe1"), MAT.STD);
+  cyl(mMul(mTrans(x1 + 1.18, 1.24, -3.65), mRotY(PI / 2)), 0, 0, -0.02, 0.06, 0.46, col("#8b929b"), MAT.STD);
+  for (var ac = 0; ac < 3; ac++) box(null, x1 + 0.36, x1 + 1.12, 0.72 + ac * 0.36, 0.78 + ac * 0.36, -6.55, -5.15, col("#aab1ba"), MAT.STD);
+  box(null, x1 + 0.34, x1 + 1.16, 2.4, 4.6, -1.4, -0.3, col("#cfd4da"), MAT.STD);
+  cyl(null, x1 + 0.36, 1.9, -7.2, 0.06, 4.5, col("#e3ded3"), MAT.STD);
+  cyl(null, x1 + 0.36, 1.9, -2.6, 0.06, 4.5, col("#e3ded3"), MAT.STD);
+  box(null, x0 + 0.4, x0 + 1.9, 1.0, 3.0, z1 + 0.28, z1 + 0.36, C.woodDark, MAT.STD);
+  panel([x0 + 0.46, 1.06, z1 + 0.368], [1.38, 0, 0], [0, 1.88, 0], "posterWall", [0.55, 0.55, 0.55], 0.6);
+  box(null, x0 + 0.9, x0 + 1.4, 3.1, 3.24, z1 + 0.3, z1 + 0.6, col("#ffe1a8"), MAT.LIT, [1.0, 0.85, 0.6]);
+
+  /* ground AC of the store */
+  box(null, 8.9, 9.9, 0.34, 1.5, 3.9, 5.1, col("#d7dbe1"), MAT.STD);
+  cyl(mMul(mTrans(8.88, 0.95, 4.5), mRotY(PI / 2)), 0, 0, -0.02, 0.05, 0.42, col("#8b929b"), MAT.STD);
+}
+
+function buildSlidingDoor(gz) {
+  DOOR.range[0] = vcount;
+  var z = gz + 0.16;
+  function leaf(cx, side) {
+    var x0 = cx - 0.78, x1 = cx + 0.78;
+    box(null, x0, x1, 0.66, 4.28, z, z + 0.12, C.metalDark, MAT.STD);
+    quad([x0 + 0.08, 0.78, z + 0.125], [x1 - 0.08, 0.78, z + 0.125], [x1 - 0.08, 4.18, z + 0.125], [x0 + 0.08, 4.18, z + 0.125],
+         [0, 0, 1], KWHITE, MAT.GLASS, [0.05, 0.09, 0.1]);
+    box(null, x0 + 0.08, x1 - 0.08, 2.30, 2.62, z + 0.12, z + 0.13, C.green, MAT.STD, [0.06, 0.22, 0.14]);
+    box(null, cx + side * 0.6, cx + side * 0.66, 1.5, 2.3, z + 0.13, z + 0.17, C.metal, MAT.STD);
+    box(null, x0 + 0.16, x0 + 0.5, 3.5, 3.8, z + 0.12, z + 0.13, col("#ffffff"), MAT.STD, [0.2, 0.2, 0.2]);
+  }
+  leaf(-0.80, 1);
+  leaf(0.80, -1);
+  DOOR.range[1] = vcount;
+  DOOR.orig = gP.slice(DOOR.range[0] * 3, DOOR.range[1] * 3);
+}
+
+/* ==========================================================================
+   INTERIOR
+   ========================================================================== */
+function buildInterior() {
+  var x0 = STORE.x0, x1 = STORE.x1, z0 = STORE.z0, z1 = STORE.z1, H = STORE.h;
+
+  /* ceiling + light panels */
+  box(null, x0, x1, H - 0.12, H, z0, z1, col("#fbf7ee"), MAT.STD);
+  for (var lx = x0 + 1.3; lx < x1 - 0.9; lx += 2.2) {
+    for (var lz = z0 + 1.0; lz < z1 - 0.9; lz += 2.5) {
+      box(null, lx - 1.0, lx + 1.0, H - 0.16, H - 0.12, lz - 0.34, lz + 0.34, col("#ffffff"), MAT.LIT, [1.0, 0.94, 0.82]);
+    }
+  }
+  for (var pd = 0; pd < 3; pd++) {
+    var pxx = 1.6 + pd * 1.5;
+    cyl(null, pxx, H - 0.9, 0.7, 0.02, 0.78, C.metalDark, MAT.STD);
+    cyl(null, pxx, H - 1.16, 0.7, 0.26, 0.26, col("#fff6e3"), MAT.LIT, [0.95, 0.86, 0.68], 0.22);
+  }
+
+  /* back wall posters + back-room door + lockers */
+  for (var pi = 0; pi < 4; pi++) {
+    var pxx0 = x0 + 0.5 + pi * 1.5;
+    box(null, pxx0 - 0.05, pxx0 + 1.06, 2.85, 4.5, z0 + 0.04, z0 + 0.1, C.metal, MAT.STD);
+    panel([pxx0, 2.9, z0 + 0.11], [0.96, 0, 0], [0, 1.56, 0], "poster" + (pi % 6), [0.62, 0.6, 0.55], 0.55);
+  }
+  box(null, x0 + 0.55, x0 + 1.55, 5.0, 5.4, z0 + 0.04, z0 + 0.08, col("#2fa36b"), MAT.LIT, [0.15, 0.45, 0.3]);
+  box(null, 5.5, 7.3, 0.52, 4.3, z0 + 0.04, z0 + 0.1, col("#b9c6d2"), MAT.STD);
+  box(null, 5.56, 7.24, 0.52, 4.24, z0 + 0.1, z0 + 0.11, col("#d3dfe9"), MAT.STD, [0.06, 0.09, 0.12]);
+  box(null, 6.3, 6.36, 2.1, 2.7, z0 + 0.11, z0 + 0.15, C.metalDark, MAT.STD);
+  for (var lk = 0; lk < 2; lk++) {
+    box(null, 6.0 + lk * 0.55, 6.5 + lk * 0.55, 4.5, 5.3, z0 + 0.04, z0 + 0.5, col("#93a1b1"), MAT.STD);
+  }
+
+  /* beverage coolers */
+  (function cooler() {
+    var cx0 = x0 + 0.06, cx1 = x0 + 1.7, cz0 = z0 + 0.12, cz1 = z0 + 1.2;
+    box(null, cx0, cx1, 0.52, 5.0, cz0, cz1, col("#e4e9ef"), MAT.STD);
+    var rows = [0.95, 1.55, 2.15, 2.75, 3.35, 3.95];
+    for (var r = 0; r < rows.length; r++) {
+      box(null, cx0 + 0.06, cx1 - 0.06, rows[r] - 0.04, rows[r], cz0 + 0.06, cz1 - 0.1, col("#ccd4de"), MAT.STD);
+      fillGoods(cx0 + 0.1, cx1 - 0.1, rows[r], cz0 + 0.55, cz0 + 0.92, 500 + r, 0.4, "x");
+    }
+    quad([cx0 + 0.04, 0.7, cz1 - 0.05], [cx1 - 0.04, 0.7, cz1 - 0.05], [cx1 - 0.04, 4.9, cz1 - 0.05], [cx0 + 0.04, 4.9, cz1 - 0.05],
+         [0, 0, 1], col("#e7f6ff"), MAT.LIT, [0.62, 0.82, 1.0]);
+    for (var m = 0; m <= 2; m++) {
+      box(null, cx0 + m * 0.55 - 0.03, cx0 + m * 0.55 + 0.05, 0.68, 4.96, cz1, cz1 + 0.06, C.metal, MAT.STD);
+    }
+    box(null, cx0, cx1, 4.86, 5.04, cz1 - 0.02, cz1 + 0.1, C.white, MAT.STD, [0.3, 0.34, 0.36]);
+    box(null, cx0, cx1, 0.52, 0.7, cz1 - 0.02, cz1 + 0.1, C.metalDark, MAT.STD);
+  })();
+
+  /* magazine rack along the west wall */
+  (function mags() {
+    var mx0 = x0 + 0.04, mx1 = x0 + 1.02;
+    for (var row = 0; row < 4; row++) {
+      var y = 0.62 + row * 0.6;
+      box(null, mx0, mx1, y, y + 0.08, -1.6, 2.6, C.shelfTrim, MAT.STD);
+      box(null, mx0, mx1, y - 0.02, y, -1.6, 2.6, C.shelf, MAT.STD);
+      var zi = -1.5, k = 0;
+      while (zi < 2.5) {
+        var w = 0.14 + (k % 3) * 0.012;
+        var mc = [C.g1, C.g2, C.g3, C.g4, C.g5, C.g6, C.g7, C.g10][(row * 5 + k) % 8];
+        box(null, mx0 + 0.06, mx1 - 0.06, y + 0.08, y + 0.52, zi, zi + w, mc, MAT.STD, [0.1, 0.1, 0.09]);
+        quad([mx1 - 0.055, y + 0.1, zi + 0.008], [mx1 - 0.055, y + 0.1, zi + w - 0.008],
+             [mx1 - 0.055, y + 0.5, zi + w - 0.008], [mx1 - 0.055, y + 0.5, zi + 0.008],
+             [1, 0, 0], KWHITE, MAT.MAG, null);
+        zi += w + 0.022; k++;
+      }
+    }
+    box(null, mx0, mx1, 3.05, 3.2, -1.7, 2.7, C.shelf, MAT.STD);
+    box(null, mx0 + 0.2, mx0 + 0.86, 3.2, 4.5, -0.9, -0.82, col("#ffd0d6"), MAT.STD, [0.2, 0.13, 0.14]);
+    box(null, mx0 + 0.2, mx0 + 0.86, 3.2, 4.5, 1.4, 1.48, col("#cfe9ff"), MAT.STD, [0.12, 0.16, 0.18]);
+    box(null, 0.2, 0.24, 0.52, 4.6, -5.4, -5.36, C.metalDark, MAT.STD);
+    box(null, 0.24, 1.0, 3.3, 4.55, -5.42, -5.38, col("#ff8095"), MAT.STD, [0.25, 0.1, 0.12]);
+  })();
+
+  /* gondola shelving */
+  gondola(-4.5, x0 + 1.6, 3.4);
+  gondola(-1.5, x0 + 1.4, 3.0);
+  gondola(1.35, x0 + 1.5, 2.6);
+
+  /* ATM island */
+  box(null, x0 + 0.4, x0 + 1.5, 0.52, 3.3, 2.5, 3.3, col("#1f6b4a"), MAT.STD);
+  panel([x0 + 0.46, 1.9, 2.49], [0.94, 0, 0], [0, 1.3, 0], "poster5", [0.6, 0.65, 0.6], 0.8);
+  box(null, x0 + 0.5, x0 + 1.4, 1.4, 1.66, 2.42, 2.5, col("#d8e4ee"), MAT.STD, [0.2, 0.25, 0.28]);
+  quad([0.4, 0.541, 4.6], [2.2, 0.541, 4.6], [2.2, 0.541, 6.6], [0.4, 0.541, 6.6],
+       [0, 1, 0], KWHITE, MAT.SIGN, [0.65, 0.65, 0.6], UV.guide);
+
+  /* hot food counters along the east wall */
+  (function hotZone() {
+    var hx0 = 6.2, hx1 = x1 - 0.04, hz0 = -1.9, hz1 = 2.7;
+    box(null, hx0, hx1, 0.52, 1.0, hz0, hz1, C.shelf, MAT.STD);
+    box(null, hx0 + 0.04, hx1 - 0.04, 1.0, 1.38, hz0 + 0.1, hz0 + 1.05, col("#d5dbe2"), MAT.STD);
+    box(null, hx0 + 0.1, hx1 - 0.1, 1.1, 1.16, hz0 + 0.16, hz0 + 0.99, col("#e9bc72"), MAT.STD, [0.16, 0.1, 0.04]);
+    var r7 = rng(88);
+    for (var o = 0; o < 12; o++) {
+      var oz = hz0 + 0.24 + (o % 6) * 0.12, ox = hx0 + 0.3 + (o % 2) * 0.7;
+      cyl(null, ox, 1.16, oz, 0.07, 0.06 + r7() * 0.1, [0.95, 0.8, 0.5], MAT.STD);
+    }
+    box(null, hx0 + 0.03, hx1 - 0.03, 1.0, 1.4, hz0 + 1.2, hz1, C.metal, MAT.STD);
+    for (var b = 0; b < 3; b++) {
+      box(null, hx0 + 0.07, hx1 - 0.07, 1.4 + b * 0.22, 1.45 + b * 0.22, hz0 + 1.25, hz0 + 1.45 + b * 0.22, col("#2a2e35"), MAT.STD, [0.14, 0.11, 0.09]);
+      fillGoods(hx0 + 0.12, hx1 - 0.12, 1.45 + b * 0.22, hz0 + 1.3, hz0 + 1.42 + b * 0.22, 420 + b, 0.16, "x");
+    }
+    quad([hx0 + 0.03, 1.42, hz0 + 1.19], [hx1 - 0.03, 1.42, hz0 + 1.19], [hx1 - 0.03, 2.25, hz0 + 1.19], [hx0 + 0.03, 2.25, hz0 + 1.19],
+         [0, 0, -1], KWHITE, MAT.GLASS, [0.08, 0.06, 0.04]);
+    box(null, hx0, hx1, 1.0, 1.4, hz1 - 0.1, hz1 + 0.6, C.shelf, MAT.STD);
+    quad([hx0 + 0.04, 1.4, hz1 + 0.62], [hx1 - 0.04, 1.4, hz1 + 0.62], [hx1 - 0.04, 1.56, hz1 + 0.62], [hx0 + 0.04, 1.56, hz1 + 0.62],
+         [0, 0, 1], col("#e2f5ff"), MAT.LIT, [0.55, 0.66, 0.7]);
+    for (var q = 0; q < 10; q++) {
+      var qz = hz1 + 0.12 + (q % 5) * 0.1, qx = hx0 + 0.2 + Math.floor(q / 5) * 0.75;
+      cyl(null, qx, 1.4, qz, 0.07, 0.07, col("#fcfbf5"), MAT.STD);
+    }
+    box(null, hx0, hx1, 0.6, 0.96, hz0 - 1.05, hz0 - 0.2, C.metalDark, MAT.STD);
+    fillGoods(hx0 + 0.06, hx1 - 0.06, 0.78, hz0 - 1.0, hz0 - 0.25, 777, 0.18, "x");
+  })();
+
+  /* checkout counter + register + coffee machine */
+  (function counter() {
+    var cx0 = 1.4, cx1 = 4.9, cz0 = -0.35, cz1 = 1.4;
+    box(null, cx0, cx1, 0.52, 1.6, cz0, cz1, col("#eceff3"), MAT.STD);
+    box(null, cx0 - 0.05, cx1 + 0.05, 1.56, 1.68, cz0 - 0.06, cz1 + 0.06, col("#fafcfd"), MAT.STD);
+    box(null, cx1 + 0.05, cx1 + 0.12, 0.52, 1.6, cz0, cz1, col("#d6dbe1"), MAT.STD);
+    box(null, 2.0, 3.0, 1.68, 1.82, 0.45, 1.1, C.metalDark, MAT.STD);
+    box(null, 2.1, 2.95, 1.82, 2.36, 0.55, 0.92, col("#2b3440"), MAT.STD, [0.12, 0.18, 0.26]);
+    quad([2.16, 2.38, 0.93], [2.9, 2.38, 0.93], [2.9, 2.38, 0.56], [2.16, 2.38, 0.56],
+         [0, 1, 0], col("#9fe8ff"), MAT.LIT, [0.42, 0.7, 0.82]);
+    box(null, 3.1, 3.6, 1.68, 1.78, 0.5, 0.9, col("#3a3f47"), MAT.STD);
+    box(null, 4.0, 4.6, 1.68, 2.4, 0.35, 1.2, col("#cfe0ea"), MAT.STD, [0.1, 0.13, 0.14]);
+    box(null, 3.75, 4.55, 1.68, 3.05, 0.4, 0.86, col("#2b2f36"), MAT.STD);
+    panel([3.79, 1.72, 0.395], [0.72, 0, 0], [0, 0.72, -0.5], "coffee", [0.85, 0.8, 0.7], 0.9, MAT.PANEL);
+    box(null, 5.1, 6.2, 1.68, 2.5, -2.9, -1.9, C.metal, MAT.STD);
+    for (var hx = 0; hx < 4; hx++) {
+      box(null, 5.16, 6.14, 1.74 + hx * 0.19, 1.82 + hx * 0.19, -2.85, -1.95, col("#c9822f"), MAT.STD, [0.05, 0.03, 0.01]);
+    }
+    quad([5.1, 1.68, -1.89], [6.2, 1.68, -1.89], [6.2, 2.55, -1.89], [5.1, 2.55, -1.89], [0, 0, 1], KWHITE, MAT.GLASS, [0.06, 0.05, 0.03]);
+    box(null, 1.4, 4.9, 1.68, 2.95, cz0 - 0.3, cz0 - 0.24, col("#e2e7ec"), MAT.STD);
+    for (var ms = 0; ms < 4; ms++) box(null, 1.6 + ms * 0.8, 2.2 + ms * 0.8, 2.3, 2.7, cz0 - 0.31, cz0 - 0.3, col("#ffe9a8"), MAT.LIT, [0.3, 0.24, 0.12]);
+    box(null, 1.6, 6.0, 0.541, 0.545, 1.85, 2.05, C.paintY, MAT.STD, [0.1, 0.08, 0.02]);
+  })();
+
+  /* brand board on the back-east wall */
+  box(null, 2.6, 5.6, 4.7, 5.9, -4.5, -4.44, col("#2fa36b"), MAT.LIT, [0.14, 0.4, 0.28]);
+  box(null, 2.7, 5.5, 4.8, 5.8, -4.44, -4.43, col("#f4fbf7"), MAT.LIT, [0.55, 0.7, 0.62]);
+
+  /* entry mat + floor guide */
+  quad([-2.1, 0.541, 3.9], [2.1, 0.541, 3.9], [2.1, 0.541, 5.0], [-2.1, 0.541, 5.0],
+       [0, 1, 0], KWHITE, MAT.SIGN, [0.7, 0.72, 0.7], UV.logoFloor);
+  quad([-2.4, 0.537, 2.4], [2.4, 0.537, 2.4], [2.4, 0.537, 3.8], [-2.4, 0.537, 3.8],
+       [0, 1, 0], KWHITE, MAT.SIGN, [0.6, 0.6, 0.55], UV.mat);
+}
+
+function gondola(zc, xa, xb) {
+  box(null, xa, xb, 0.52, 0.66, zc - 0.62, zc + 0.62, C.shelfTrim, MAT.STD);
+  box(null, xa - 0.05, xa + 0.06, 0.52, 2.62, zc - 0.64, zc + 0.64, C.shelf, MAT.STD);
+  box(null, xb - 0.06, xb + 0.05, 0.52, 2.62, zc - 0.64, zc + 0.64, C.shelf, MAT.STD);
+  box(null, xa, xb, 2.56, 2.7, zc - 0.64, zc + 0.64, C.shelf, MAT.STD, [0.06, 0.06, 0.06]);
+  var ys = [0.66, 1.28, 1.9];
+  for (var s = 0; s < ys.length; s++) {
+    var y = ys[s];
+    box(null, xa, xb, y - 0.06, y, zc - 0.68, zc + 0.68, C.shelf, MAT.STD);
+    fillGoods(xa + 0.1, xb - 0.1, y, zc - 0.62, zc - 0.22, 100 + s * 13 + Math.round(zc * 7), 0.26, "x");
+    fillGoods(xa + 0.1, xb - 0.1, y, zc + 0.22, zc + 0.62, 300 + s * 17 + Math.round(zc * 5), 0.26, "x");
+    box(null, xa, xb, y - 0.14, y - 0.065, zc - 0.7, zc - 0.68, col("#ffe46a"), MAT.STD, [0.18, 0.14, 0.04]);
+    box(null, xa, xb, y - 0.14, y - 0.065, zc + 0.68, zc + 0.7, col("#ffe46a"), MAT.STD, [0.18, 0.14, 0.04]);
+  }
+  box(null, xb + 0.06, xb + 0.62, 0.52, 0.66, zc - 0.62, zc + 0.62, C.shelfTrim, MAT.STD);
+  fillGoods(xb + 0.1, xb + 0.58, 0.66, zc - 0.56, zc + 0.56, 900 + Math.round(zc * 3), 0.42, "z");
+  box(null, xb + 0.06, xb + 0.62, 1.3, 1.36, zc - 0.62, zc + 0.62, C.shelfTrim, MAT.STD);
+}
+
+var GOODS = [C.g1, C.g2, C.g3, C.g4, C.g5, C.g6, C.g7, C.g8, C.g9, C.g10, C.g11, C.g12];
+function fillGoods(a0, a1, y, b0, b1, seed, hBase, axis) {
+  var r = rng((seed * 977 + 13) >>> 0);
+  var a = a0, guard = 0;
+  while (a < a1 - 0.07 && guard++ < 200) {
+    var w = 0.075 + r() * 0.1;
+    if (a + w > a1) w = a1 - a;
+    if (w < 0.03) break;
+    var h = hBase * (0.62 + r() * 0.5);
+    var c = GOODS[Math.floor(r() * 12)];
+    if (axis === "x") {
+      box(null, a, a + w, y, y + h, b0, b1, c, MAT.STD, [0.13, 0.12, 0.1]);
+      if (r() > 0.55) box(null, a, a + w, y + h, y + h + 0.03, b0, b1, C.white, MAT.STD, [0.26, 0.26, 0.24]);
+    } else {
+      box(null, b0, b1, y, y + h, a, a + w, c, MAT.STD, [0.13, 0.12, 0.1]);
+    }
+    a += w + 0.014;
+  }
+}
+
+/* ==========================================================================
+   FORECOURT
+   ========================================================================== */
+function buildForecourt() {
+  /* vending machines */
+  (function vending() {
+    var x0 = 2.4, x1 = 4.0, z0 = 4.9, z1 = 5.95;
+    box(null, x0, x1, 0.34, 3.2, z0, z1, C.vendBlue, MAT.STD);
+    box(null, x0 - 0.03, x1 + 0.03, 3.2, 3.34, z0 - 0.03, z1 + 0.03, C.white, MAT.STD);
+    box(null, x0 - 0.03, x1 + 0.03, 0.34, 0.48, z0 - 0.03, z1 + 0.03, col("#2a3a52"), MAT.STD);
+    panel([x0 + 0.06, 0.44, z1 + 0.004], [x1 - x0 - 0.12, 0, 0], [0, 2.72, 0], "vend", [0.95, 0.95, 0.95], 0.85);
+    quad([x1 + 0.006, 0.5, z0 + 0.12], [x1 + 0.006, 0.5, z1 - 0.12], [x1 + 0.006, 3.05, z1 - 0.12], [x1 + 0.006, 3.05, z0 + 0.12],
+         [1, 0, 0], col("#8fd0ff"), MAT.LIT, [0.3, 0.5, 0.8]);
+    LAMP_SPEC.push({ p: [3.2, 1.7, 6.6], c: [0.5, 0.72, 1.0], r: 7.5, kind: 0 });
+    var x2 = 4.2, x3 = 5.3, z2 = 5.05, z3 = 5.95;
+    box(null, x2, x3, 0.34, 3.0, z2, z3, C.vendRed, MAT.STD);
+    box(null, x2 - 0.02, x3 + 0.02, 3.0, 3.12, z2 - 0.02, z3 + 0.02, C.white, MAT.STD);
+    panel([x2 + 0.05, 0.44, z3 + 0.004], [x3 - x2 - 0.1, 0, 0], [0, 2.5, 0], "vend", [0.85, 0.75, 0.7], 0.7);
+    box(null, x2 - 0.16, x2 - 0.03, 0.34, 1.12, z2 + 0.1, z3 - 0.1, col("#e6e9ec"), MAT.STD);
+    cyl(null, x2 - 0.095, 1.12, (z2 + z3) / 2, 0.13, 0.06, col("#2fa36b"), MAT.STD);
+  })();
+
+  /* umbrella stand */
+  (function umbrella() {
+    var x0 = -3.5, x1 = -2.4, z0 = 4.75, z1 = 5.45;
+    box(null, x0, x1, 0.34, 1.2, z0, z1, C.metalDark, MAT.STD);
+    box(null, x0 - 0.05, x1 + 0.05, 1.2, 1.28, z0 - 0.05, z1 + 0.05, C.metal, MAT.STD);
+    var r = rng(5);
+    var cols = [col("#2b4a7a"), col("#7a2b3a"), col("#2b6a4a"), col("#cfd6e0"), col("#5a4a7a"), col("#c9943c")];
+    for (var u = 0; u < 6; u++) {
+      var ux = x0 + 0.2 + u * 0.15, uz = z0 + 0.3 + (u % 2) * 0.2;
+      cyl(null, ux, 1.28, uz, 0.032, 2.2 + r() * 0.7, cols[u], MAT.STD);
+      cyl(null, ux, 1.45, uz, 0.1, 0.72, cols[u], MAT.STD, null, 0.05);
+    }
+  })();
+
+  /* trash bins */
+  cyl(null, 1.55, 0.34, 6.2, 0.29, 0.92, C.metal, MAT.STD);
+  cyl(null, 2.12, 0.34, 6.2, 0.29, 0.92, C.metal, MAT.STD);
+  cyl(null, 1.55, 1.26, 6.2, 0.3, 0.1, C.green, MAT.STD);
+  cyl(null, 2.12, 1.26, 6.2, 0.3, 0.1, C.green, MAT.STD);
+  box(null, 1.2, 2.5, 0.34, 0.42, 6.1, 6.4, col("#4a505c"), MAT.STD);
+
+  /* bicycle */
+  (function bike() {
+    var bx = 6.4, bz = 6.7, r = 0.52, gy = 0.34;
+    var frame = col("#c4482f");
+    function wheel(px) {
+      var M = mMul(mTrans(px, gy + r, bz), mRotX(PI / 2));
+      cyl(M, 0, 0, -0.055, 0.11, r, col("#16191f"), MAT.STD);
+      cyl(M, 0, 0, 0.055, 0.065, r * 0.9, C.metal, MAT.STD);
+      cyl(M, 0, 0, 0.11, 0.13, r * 0.18, C.metalDark, MAT.STD);
+      for (var s = 0; s < 8; s++) {
+        var a = s / 8 * PI * 2;
+        beam(null, px, bz, px + Math.cos(a) * r * 0.88, bz + Math.sin(a) * r * 0.88, gy + r - 0.008, 0.018, 0.016, C.steel, MAT.STD);
+      }
+    }
+    wheel(bx); wheel(bx + 1.62);
+    var yb = gy + 0.95;
+    beam(null, bx, bz, bx + 0.7, bz, yb - 0.06, 0.065, 0.065, frame, MAT.STD);
+    beam(null, bx + 0.7, bz, bx + 1.6, bz, yb - 0.2, 0.055, 0.055, frame, MAT.STD);
+    beam(null, bx, bz, bx + 0.58, bz, yb + 0.16, 0.055, 0.055, frame, MAT.STD);
+    beam(null, bx + 0.58, bz, bx + 0.7, bz, yb - 0.06, 0.05, 0.055, C.steel, MAT.STD);
+    beam(null, bx + 1.6, bz, bx + 1.55, bz, yb + 0.14, 0.045, 0.5, C.metalDark, MAT.STD);
+    beam(null, bx + 1.44, bz - 0.26, bx + 1.44, bz + 0.26, yb + 0.28, 0.04, 0.04, C.metalDark, MAT.STD);
+    box(null, bx + 0.38, bx + 0.86, yb + 0.14, yb + 0.24, bz - 0.11, bz + 0.11, col("#2b2f36"), MAT.STD);
+    box(null, bx + 1.3, bx + 1.66, yb - 0.08, yb + 0.34, bz - 0.28, bz + 0.28, col("#c9ccd2"), MAT.STD);
+    beam(null, bx + 0.78, bz, bx + 0.62, bz + 0.4, gy + 0.01, 0.028, 0.92, C.metalDark, MAT.STD);
+  })();
+  (function bike2() {
+    var bx = 8.9, bz = -1.2, r = 0.5, gy = 0.34;
+    function wheelMS(px) {
+      var M = mMul(mTrans(px, gy + r, bz), mMul(mRotX(PI / 2), mRotZ(rad(4))));
+      cyl(M, 0, 0, -0.05, 0.1, r, col("#191c22"), MAT.STD);
+      cyl(M, 0, 0, 0.05, 0.06, r * 0.9, C.metal, MAT.STD);
+    }
+    wheelMS(bx); wheelMS(bx + 1.55);
+    beam(null, bx, bz, bx + 0.65, bz, gy + 0.9, 0.06, 0.06, col("#30507a"), MAT.STD);
+    beam(null, bx + 0.65, bz, bx + 1.5, bz, gy + 0.76, 0.05, 0.05, col("#30507a"), MAT.STD);
+    beam(null, bx, bz, bx + 0.55, bz, gy + 1.08, 0.05, 0.05, col("#30507a"), MAT.STD);
+    box(null, bx + 0.36, bx + 0.8, gy + 1.06, gy + 1.16, bz - 0.1, bz + 0.1, col("#2b2f36"), MAT.STD);
+  })();
+
+  /* parking bays */
+  for (var p = 0; p < 3; p++) {
+    var px = 11.4 + p * 2.6;
+    box(null, px, px + 0.1, 0.345, 0.36, 9.4, 15.8, C.paint, MAT.WALK);
+    box(null, px + 0.95, px + 1.05, 0.345, 0.36, 9.4, 12.6, C.paint, MAT.WALK);
+  }
+  box(null, 11.4, 19.5, 0.345, 0.36, 15.7, 15.8, C.paint, MAT.WALK);
+
+  /* guardrails */
+  for (var gx = 0.8; gx < 19.4; gx += 2.8) {
+    cyl(null, gx, 0.34, 8.92, 0.075, 1.02, col("#e0e4e9"), MAT.STD);
+    cyl(null, gx, 1.32, 8.92, 0.09, 0.06, col("#cfd4db"), MAT.STD);
+  }
+  beam(null, 0.8, 8.92, 19.2, 8.92, 1.22, 0.07, 0.07, col("#eef1f5"), MAT.STD);
+  beam(null, 0.8, 8.92, 19.2, 8.92, 0.92, 0.055, 0.055, col("#c6ccd4"), MAT.STD);
+  for (var gz2 = -8.6; gz2 < 6.0; gz2 += 2.8) cyl(null, -8.94, 0.34, gz2, 0.07, 1.0, col("#e0e4e9"), MAT.STD);
+  beam(null, -8.94, 6.0, -8.94, -8.6, 1.2, 0.065, 0.065, col("#eef1f5"), MAT.STD);
+
+  /* street lamps */
+  function streetLamp(px, pz, dir, cool, h) {
+    h = h || 7.0;
+    cyl(null, px, 0.34, pz, 0.16, h, C.pole, MAT.STD);
+    cyl(null, px, 0.34, pz, 0.3, 0.7, C.poleDark, MAT.STD);
+    cyl(null, px, h + 0.3, pz, 0.22, 0.22, C.poleDark, MAT.STD);
+    var ax = px + dir * 1.15;
+    beam(null, px, pz, ax, pz, h + 0.4, 0.1, 0.1, C.pole, MAT.STD);
+    box(null, ax - dir * 0.62, ax + dir * 0.42, h + 0.14, h + 0.42, pz - 0.26, pz + 0.26, col("#31343c"), MAT.STD);
+    quad([ax - dir * 0.58, h + 0.135, pz + 0.24], [ax + dir * 0.38, h + 0.135, pz + 0.24],
+         [ax + dir * 0.38, h + 0.135, pz - 0.24], [ax - dir * 0.58, h + 0.135, pz - 0.24],
+         [0, -1, 0], col("#fff4dc"), MAT.LIT, [1.0, 0.94, 0.78]);
+    LAMP_SPEC.push({ p: [ax, h - 0.6, pz], c: cool ? [0.8, 0.88, 1.0] : [1.0, 0.84, 0.6], r: 15, kind: 1 });
+  }
+  streetLamp(11.6, 8.2, -1, false);
+  streetLamp(-8.4, 8.2, 1, false);
+  streetLamp(-13.0, -18.4, 1, true);
+
+  /* utility poles + wires */
+  function utilityPole(px, pz, h) {
+    cyl(null, px, 0.34, pz, 0.2, h, col("#8f897f"), MAT.WALK);
+    cyl(null, px, 0.34, pz, 0.27, 0.5, col("#6f6a62"), MAT.STD);
+    for (var a = 0; a < 3; a++) {
+      var yy = h * 0.72 + a * 0.85;
+      beam(null, px - 1.05, pz, px + 1.05, pz, yy, 0.09, 0.09, col("#6f6b66"), MAT.STD);
+      for (var k = -1; k <= 1; k += 2) {
+        cyl(null, px + k * 0.95, yy + 0.12, pz, 0.06, 0.16, col("#3a3f47"), MAT.STD);
+        cyl(null, px + k * 0.95, yy + 0.28, pz, 0.075, 0.03, col("#d8d2c4"), MAT.STD);
+      }
+    }
+    cyl(null, px + 0.5, h * 0.58, pz + 0.15, 0.32, 0.9, col("#7d838c"), MAT.STD);
+    cyl(null, px + 0.5, h * 0.58 + 0.9, pz + 0.15, 0.36, 0.07, C.metalDark, MAT.STD);
+    box(null, px - 0.34, px + 0.04, 2.3, 3.4, pz + 0.13, pz + 0.18, C.white, MAT.STD);
+    box(null, px - 0.31, px + 0.01, 2.4, 3.3, pz + 0.18, pz + 0.19, col("#2f5fa8"), MAT.STD, [0.06, 0.1, 0.18]);
+    box(null, px - 0.36, px + 0.06, 4.0, 4.5, pz + 0.13, pz + 0.17, col("#e8d34a"), MAT.STD, [0.12, 0.1, 0.03]);
+    return h;
+  }
+  var ph = utilityPole(-7.9, 7.5, 11.0);
+  utilityPole(19.3, 7.5, 10.0);
+  utilityPole(-8.2, 19.2, 10.0);
+  for (var w = 0; w < 3; w++) {
+    var wy = 0.34 + ph * 0.72 + w * 0.85;
+    var hy = 0.34 + 9.9 * 0.72 + w * 0.85;
+    cable([-7.9, wy, 7.5], [19.3, hy, 7.5], 1.5 + w * 0.4, 0.028, C.wire);
+    cable([-8.0, wy, 6.45], [-8.2, hy, 19.2], 1.1 + w * 0.3, 0.028, C.wire);
+    cable([-7.9, wy - 0.25, 7.5], [-19.9, 6.3 + w * 0.45, 5.2], 1.4, 0.026, C.wire);
+    cable([-7.9, wy - 0.2, 7.5], [-6.2, 5.9, 3.6], 0.55, 0.026, C.wire);
+  }
+  cable([-7.9, 6.9, 7.5], [9.9, 9.6, 5.6], 1.2, 0.026, C.wire);
+
+  /* street sign + convex mirror */
+  cyl(null, -8.86, 0.34, 2.6, 0.05, 4.5, C.pole, MAT.STD);
+  beam(null, -8.86, 2.6, -7.1, 2.6, 4.4, 0.05, 0.05, C.pole, MAT.STD);
+  box(null, -7.7, -6.3, 3.9, 4.45, 2.55, 2.65, col("#2f6fd0"), MAT.STD);
+  panel([-7.66, 3.94, 2.545], [-1.0, 0, 0], [0, 0.47, 0], "streetSign", [0.85, 0.88, 0.95], 0.25);
+  box(null, -7.75, -6.2, 4.5, 4.6, 2.5, 2.72, col("#ffcf6b"), MAT.LIT, [0.5, 0.4, 0.2]);
+  cyl(null, -8.86, 0.34, 15.4, 0.05, 3.5, C.pole, MAT.STD);
+  var MM = mMul(mTrans(-8.86, 3.9, 15.4), mMul(mRotY(rad(38)), mRotX(rad(-10))));
+  cyl(MM, 0, 0, -0.06, 0.06, 0.64, col("#ff8a2b"), MAT.STD);
+  cyl(MM, 0, 0, 0.06, 0.075, 0.56, col("#cfe6f2"), MAT.STD, [0.1, 0.14, 0.18]);
+  box(null, -8.9, -8.82, 3.1, 4.0, 15.35, 15.45, C.poleDark, MAT.STD);
+
+  /* A-frame + chalkboard */
+  var MA = mMul(mTrans(-4.4, 0.34, 6.6), mRotY(rad(20)));
+  box(MA, -0.5, 0.5, 0, 1.05, -0.08, 0.08, C.white, MAT.STD);
+  box(MA, -0.44, 0.44, 0.1, 0.92, 0.08, 0.09, col("#ffd166"), MAT.STD, [0.18, 0.14, 0.05]);
+  box(MA, -0.44, -0.34, 0.92, 0.99, 0.08, 0.09, col("#e5484d"), MAT.STD, [0.2, 0.06, 0.06]);
+  var MB = mMul(mTrans(-5.3, 0.34, 7.2), mRotY(rad(-14)));
+  box(MB, -0.42, 0.42, 0, 0.9, -0.1, 0.02, col("#3b3f47"), MAT.STD);
+  box(MB, -0.36, 0.36, 0.15, 0.75, 0.02, 0.03, col("#24262b"), MAT.STD, [0.05, 0.05, 0.05]);
+
+  /* hydrant */
+  cyl(null, -2.6, 0.34, 6.6, 0.16, 0.42, col("#c94b3f"), MAT.STD);
+  cyl(null, -2.6, 0.76, 6.6, 0.19, 0.09, col("#5f6a78"), MAT.STD);
+}
+
+/* ==========================================================================
+   SURROUNDINGS
+   ========================================================================== */
+function buildSurroundings() {
+  /* alley east of the store */
+  box(null, 9.2, 13.4, 0.30, 0.345, -8.6, 8.6, col("#3a3d45"), MAT.WALK);
+  box(null, 13.4, 20.0, 0.34, 13.2, -8.6, 8.6, col("#7c797f"), MAT.STD);
+  box(null, 13.36, 13.4, 0.34, 13.2, -8.6, 8.6, col("#85828a"), MAT.STD);
+  for (var wz = -7.2; wz < 8.2; wz += 2.2) {
+    for (var wy = 1.9; wy < 11.8; wy += 2.15) {
+      box(null, 13.30, 13.36, wy, wy + 1.5, wz, wz + 1.4, col("#1e2636"), MAT.STD);
+      var on = ((Math.round(wz * 3) + Math.round(wy * 2)) % 5);
+      if (on > 1) {
+        box(null, 13.28, 13.30, wy + 0.1, wy + 1.4, wz + 0.1, wz + 1.3,
+            on === 3 ? col("#cfe4ff") : col("#ffd9a0"), MAT.LIT,
+            on === 3 ? [0.14, 0.2, 0.28] : [0.26, 0.2, 0.11]);
+      }
+    }
+  }
+  box(null, 13.3, 13.36, 12.4, 13.2, -8.6, 8.6, col("#6a6870"), MAT.STD);
+  for (var br = -7.0; br < 8; br += 2.2) box(null, 13.1, 13.36, 4.1, 4.16, br, br + 1.5, col("#9aa2ad"), MAT.STD);
+  box(null, 9.2, 20.0, 0.34, 12.2, -9.2, -8.6, col("#6a6470"), MAT.STD);
+  for (var gb = 0; gb < 13; gb++) cyl(null, 9.4 + gb * 0.31, 0.34, 8.6, 0.038, 3.05, col("#5a4a55"), MAT.STD);
+  beam(null, 9.3, 8.6, 13.3, 8.6, 3.35, 0.08, 0.1, col("#5a4a55"), MAT.STD);
+  beam(null, 9.3, 8.6, 13.3, 8.6, 1.75, 0.06, 0.06, col("#5a4a55"), MAT.STD);
+  box(null, 9.24, 9.56, 4.0, 4.5, 7.8, 8.1, col("#2a2622"), MAT.STD);
+  box(null, 9.28, 9.52, 4.05, 4.45, 8.1, 8.13, col("#ffb266"), MAT.LIT, [0.95, 0.5, 0.18]);
+  LAMP_SPEC.push({ p: [9.4, 3.6, 8.5], c: [1.0, 0.6, 0.3], r: 6.5, kind: 0 });
+  box(null, 9.9, 10.7, 0.34, 0.86, 3.9, 4.6, col("#c94b3f"), MAT.STD);
+  box(null, 9.9, 10.7, 0.86, 1.36, 3.9, 4.6, col("#3a6fbf"), MAT.STD);
+  box(null, 10.9, 11.6, 0.34, 1.25, 4.1, 4.8, col("#8a8f99"), MAT.STD);
+  box(null, 12.6, 13.35, 2.2, 3.4, -3.4, -2.4, col("#d7dbe1"), MAT.STD);
+  box(null, 12.6, 13.35, 2.2, 3.4, -1.6, -0.6, col("#d7dbe1"), MAT.STD);
+  for (var ap = 0; ap < 3; ap++) cyl(null, 12.5, 2.4, -4.2 + ap * 1.6, 0.06, 3.0, col("#c9c3b6"), MAT.STD);
+  box(null, 12.9, 13.0, 2.4, 3.0, -8.4, -7.0, col("#1d2129"), MAT.STD);
+  box(null, 12.88, 12.9, 2.55, 2.85, -8.1, -7.7, col("#ff5a5a"), MAT.LIT, [0.85, 0.12, 0.12]);
+  LAMP_SPEC.push({ p: [12.8, 2.7, -7.9], c: [0.9, 0.2, 0.18], r: 4.5, kind: 0 });
+  box(null, 8.4, 8.46, 0.52, 3.4, -8.0, -6.6, col("#9aa1ab"), MAT.STD);
+
+  /* NE neighbouring building */
+  box(null, 9.4, 20.0, 0.34, 11.0, -8.6, -3.6, col("#6e717d"), MAT.STD);
+  box(null, 9.4, 20.0, 11.0, 11.3, -8.7, -3.5, col("#565a66"), MAT.STD);
+  for (var wn = 0; wn < 7; wn++) {
+    var wnx = 9.9 + wn * 1.42;
+    for (var lv = 0; lv < 4; lv++) {
+      var wy2 = 2.2 + lv * 2.0;
+      box(null, wnx, wnx + 1.02, wy2, wy2 + 1.35, -3.61, -3.56, col("#182031"), MAT.STD);
+      if (((wn * 3 + lv * 5) % 4) > 1) {
+        var cc = (wn + lv) % 3 === 0 ? col("#cfe4ff") : col("#ffd9a0");
+        var ee = (wn + lv) % 3 === 0 ? [0.15, 0.2, 0.28] : [0.28, 0.21, 0.11];
+        box(null, wnx + 0.08, wnx + 0.94, wy2 + 0.08, wy2 + 1.27, -3.62, -3.61, cc, MAT.LIT, ee);
+      }
+    }
+  }
+
+  /* apartment block across the E-W road */
+  box(null, -9.0, 8.6, 0.30, 9.2, -14.2, -9.5, col("#5e6575"), MAT.STD);
+  box(null, -9.2, 8.8, 9.2, 9.7, -14.3, -9.4, col("#4b514f"), MAT.STD);
+  for (var wq = 0; wq < 10; wq++) {
+    for (var fq = 0; fq < 4; fq++) {
+      var wxq = -8.2 + wq * 1.68, wyq = 2.0 + fq * 1.75;
+      box(null, wxq, wxq + 1.06, wyq, wyq + 1.18, -9.51, -9.46, col("#141a26"), MAT.STD);
+      if (((wq * 4 + fq) % 5) > 1) {
+        box(null, wxq + 0.08, wxq + 0.98, wyq + 0.08, wyq + 1.1, -9.52, -9.51,
+            (wq + fq) % 3 === 0 ? col("#cfe4ff") : col("#ffdca6"), MAT.LIT,
+            (wq + fq) % 3 === 0 ? [0.15, 0.2, 0.28] : [0.3, 0.24, 0.13]);
+      }
+    }
+  }
+  box(null, -5.2, -3.0, 0.30, 2.6, -9.5, -9.44, col("#ffd9a0"), MAT.LIT, [0.35, 0.28, 0.16]);
+  box(null, 0.6, 2.6, 0.30, 2.4, -9.5, -9.45, col("#bfe0ff"), MAT.LIT, [0.18, 0.24, 0.3]);
+  box(null, 4.2, 5.2, 0.30, 2.2, -9.5, -9.4, col("#7b2f38"), MAT.STD);
+  panel([4.26, 0.5, -9.39], [0.88, 0, 0], [0, 1.62, 0], "vend", [0.7, 0.62, 0.58], 0.7);
+  LAMP_SPEC.push({ p: [4.7, 1.7, -8.8], c: [0.8, 0.6, 0.55], r: 5, kind: 0 });
+
+  /* block across the N-S road */
+  box(null, -19.0, -9.6, 0.30, 10.0, -9.0, 8.6, col("#676c7c"), MAT.STD);
+  for (var wr = 0; wr < 8; wr++) {
+    for (var lr = 0; lr < 4; lr++) {
+      var wzr = -8.2 + wr * 2.0, wyr = 2.0 + lr * 2.1;
+      if (wzr > 8.6) continue;
+      box(null, -9.61, -9.56, wyr, wyr + 1.3, wzr, wzr + 1.2, col("#151b27"), MAT.STD);
+      if (((wr * 3 + lr) % 4) > 1) {
+        box(null, -9.62, -9.61, wyr + 0.08, wyr + 1.22, wzr + 0.08, wzr + 1.12, col("#ffd9a0"), MAT.LIT, [0.26, 0.2, 0.1]);
+      }
+    }
+  }
+  box(null, -12.6, -11.4, 4.0, 5.0, -2.0, -1.9, col("#ff9a3d"), MAT.LIT, [0.5, 0.28, 0.1]);
+  box(null, -12.6, -11.4, 3.6, 4.0, -2.0, -1.9, col("#2fa36b"), MAT.LIT, [0.1, 0.3, 0.2]);
+
+  /* hedge planter + street tree */
+  box(null, -8.6, -7.0, 0.34, 1.12, 9.6, 13.6, col("#cfcac0"), MAT.STD);
+  box(null, -8.65, -6.95, 1.12, 1.18, 9.55, 13.65, col("#ded9cf"), MAT.STD);
+  (function hedge() {
+    var r = rng(21);
+    for (var h = 0; h < 13; h++) {
+      var hx = -8.44 + r() * 1.44, hz = 9.85 + r() * 3.5, s = 0.34 + r() * 0.22;
+      cyl(null, hx, 1.12, hz, s, s * 1.5, [C.leaf2, C.leaf, C.leaf3][h % 3], MAT.FOLIAGE, null, s * 0.8);
+    }
+  })();
+  (function tree() {
+    cyl(null, -7.8, 0.34, 11.6, 0.16, 3.6, C.brown, MAT.STD);
+    var r = rng(8);
+    for (var b = 0; b < 9; b++) {
+      var bx = -7.8 + (r() - 0.5) * 2.2, bz = 11.6 + (r() - 0.5) * 2.0, by = 3.2 + r() * 1.3;
+      var s = 0.5 + r() * 0.35;
+      cyl(null, bx, by, bz, s, s * 1.1, b % 2 ? C.leaf : C.leaf3, MAT.FOLIAGE, null, s * 0.75);
+    }
+  })();
+  box(null, 6.6, 8.2, 0.34, 1.0, 9.6, 11.2, col("#cfcac0"), MAT.STD);
+  (function shrub() {
+    var r = rng(33);
+    for (var i = 0; i < 6; i++) {
+      var sx = 6.75 + r() * 1.3, sz = 9.75 + r() * 1.3, s = 0.3 + r() * 0.18;
+      cyl(null, sx, 1.0, sz, s, s * 1.4, i % 2 ? C.leaf : C.leaf2, MAT.FOLIAGE, null, s * 0.8);
+    }
+  })();
+
+  trafficSignal(-8.8, -9.7, rad(138), 2);
+  trafficSignal(9.6, 8.6, rad(-42), 0);
+}
+
+function trafficSignal(px, pz, yaw, lit) {
+  cyl(null, px, 0.34, pz, 0.12, 6.5, C.poleDark, MAT.STD);
+  var ex = px + Math.sin(yaw) * 3.4, ez = pz + Math.cos(yaw) * 3.4;
+  beam(null, px, pz, ex, ez, 6.1, 0.1, 0.1, C.poleDark, MAT.STD);
+  var Mh = mMul(mTrans(ex, 0, ez), mRotY(yaw));
+  box(Mh, -1.1, 1.1, 5.2, 6.05, -0.24, 0.24, col("#3c4350"), MAT.STD);
+  box(Mh, -1.16, 1.16, 6.05, 6.14, -0.29, 0.29, col("#2c323c"), MAT.STD);
+  box(Mh, -1.12, 1.12, 5.1, 5.2, -0.26, 0.26, col("#2c323c"), MAT.STD);
+  var cols3 = [[0.95, 0.12, 0.1], [0.95, 0.62, 0.1], [0.2, 0.95, 0.58]];
+  for (var l = 0; l < 3; l++) {
+    var lx = -0.66 + l * 0.66;
+    box(Mh, lx - 0.24, lx + 0.24, 5.3, 5.95, 0.24, 0.27, col("#131721"), MAT.STD);
+    var on = (l === lit);
+    var s = on ? 1 : 0.07;
+    box(Mh, lx - 0.18, lx + 0.18, 5.36, 5.89, 0.27, 0.30,
+        [cols3[l][0] * s + 0.05, cols3[l][1] * s + 0.05, cols3[l][2] * s + 0.05], MAT.LIT,
+        [cols3[l][0] * s, cols3[l][1] * s, cols3[l][2] * s]);
+    box(Mh, lx - 0.18, lx + 0.18, 5.36, 5.89, -0.30, -0.27,
+        [cols3[l][0] * s + 0.05, cols3[l][1] * s + 0.05, cols3[l][2] * s + 0.05], MAT.LIT,
+        [cols3[l][0] * s, cols3[l][1] * s, cols3[l][2] * s]);
+  }
+  var Mp = mMul(mTrans(px, 0, pz), mRotY(yaw));
+  box(Mp, -0.2, 0.2, 3.9, 4.6, 0.16, 0.22, col("#3c4350"), MAT.STD);
+  box(Mp, -0.14, 0.14, 4.05, 4.5, 0.22, 0.24, col("#5ff0b0"), MAT.LIT, [0.15, 0.5, 0.34]);
+  LAMP_SPEC.push({ p: [ex, 4.8, ez], c: lit === 2 ? [0.3, 0.9, 0.55] : [1.0, 0.3, 0.25], r: 6.5, kind: 1 });
+}
+
+function buildSky() {
+  var R = 190, seg = 32, rings = 12;
+  for (var r = 0; r < rings; r++) {
+    var t0 = (r / rings) * PI * 0.5, t1 = ((r + 1) / rings) * PI * 0.5;
+    for (var s = 0; s < seg; s++) {
+      var a0 = (s / seg) * PI * 2, a1 = ((s + 1) / seg) * PI * 2;
+      var p0 = skyP(t0, a0, R), p1 = skyP(t0, a1, R), p2 = skyP(t1, a1, R), p3 = skyP(t1, a0, R);
+      quad(p0, p1, p2, p3, [-p0[0] / R, -p0[1] / R, -p0[2] / R], KWHITE, MAT.SKY, [0, 0, 0]);
+    }
+  }
+}
+function skyP(t, a, R) {
+  return [Math.cos(t) * Math.cos(a) * R, Math.sin(t) * R - 6, Math.cos(t) * Math.sin(a) * R];
+}
+
+/* ==========================================================================
+   PUDDLES + transparent overlay
+   ========================================================================== */
+function finalizePuddles() {
+  var P = [
+    [4.2, 10.6, 2.4, 1.25, 0.08], [-3.2, 12.8, 1.9, 1.0, -0.16], [12.0, 11.6, 2.8, 1.3, 0.05],
+    [-6.6, 13.9, 1.5, 0.85, 0.22], [13.4, 15.4, 1.7, 0.95, -0.1], [4.8, 17.8, 3.0, 1.35, 0.03],
+    [-13.6, 12.8, 1.7, 3.5, 1.57], [-14.1, -6.6, 2.0, 1.15, 0.0], [-13.4, -16.4, 1.8, 1.3, 0.1],
+    [0.8, -13.0, 2.6, 1.2, 0.02], [10.2, -13.2, 3.0, 1.4, -0.05], [-17.4, 4.2, 1.5, 2.5, 0.6],
+    [17.2, 12.4, 1.4, 0.9, 0.0], [-2.4, -17.6, 2.2, 1.0, 0.0], [17.6, -3.2, 2.0, 1.0, 0.0],
+    [-6.2, -12.0, 2.6, 1.1, 0.1]
+  ];
+  PUDDLES = P;
+  for (var i = 0; i < 12; i++) {
+    var p = P[i];
+    PUD_GEO[i*4] = p[0]; PUD_GEO[i*4+1] = p[1]; PUD_GEO[i*4+2] = p[2]; PUD_GEO[i*4+3] = p[4];
+  }
+}
+
+var oP = [], oN = [], oU = [], oC = [], oK = [], oPar = [], oA = [], oB = [];
+var outCount = 0, indexOut = [];
+function ovtx(p, n, u, c, kind, par, a) {
+  oP.push(p[0], p[1], p[2]); oN.push(n[0], n[1], n[2]); oU.push(u[0], u[1]);
+  oC.push(c[0], c[1], c[2]); oK.push(kind); oPar.push(par[0], par[1]);
+  oA.push(a); oB.push(par[1]);
+  return outCount++;
+}
+function oquad(p0, p1, p2, p3, n, c, kind, par, a, uv0, uv1) {
+  uv0 = uv0 || [0, 0]; uv1 = uv1 || [1, 1];
+  var a0 = ovtx(p0, n, [uv0[0], uv0[1]], c, kind, par, a);
+  var b0 = ovtx(p1, n, [uv1[0], uv0[1]], c, kind, par, a);
+  var c0 = ovtx(p2, n, [uv1[0], uv1[1]], c, kind, par, a);
+  var d0 = ovtx(p3, n, [uv0[0], uv1[1]], c, kind, par, a);
+  indexOut.push(a0, b0, c0, a0, c0, d0);
+}
+
+var OUT_DATA = null;
+function buildOutsideLayer() {
+  /* warm light pools spilled by the storefront */
+  var pools = [
+    [1.0, 7.0, 5.4, 2.2], [6.0, 6.6, 2.6, 1.9], [-4.6, 6.9, 2.6, 1.9],
+    [3.2, 6.4, 1.8, 1.4], [-2.6, 6.6, 1.7, 1.3], [9.3, 6.4, 1.4, 1.2]
+  ];
+  for (var i = 0; i < pools.length; i++) {
+    var q = pools[i], nn = 18;
+    for (var k = 0; k < nn; k++) {
+      var a0 = k / nn * PI * 2, a1 = (k + 1) / nn * PI * 2;
+      var c0 = ovtx([q[0], 0.05, q[1]], [0, 1, 0], [0, 0], [1.0, 0.78, 0.48], 0, [q[0], q[1]], 0.95);
+      var c1 = ovtx([q[0] + Math.cos(a0) * q[2], 0.05, q[1] + Math.sin(a0) * q[3]], [0, 1, 0], [0, 0], [0.5, 0.4, 0.25], 0, [q[0], q[1]], 0.0);
+      var c2 = ovtx([q[0] + Math.cos(a1) * q[2], 0.05, q[1] + Math.sin(a1) * q[3]], [0, 1, 0], [0, 0], [0.5, 0.4, 0.25], 0, [q[0], q[1]], 0.0);
+      indexOut.push(c0, c1, c2);
+    }
+  }
+  /* rain running down the storefront glass: thin animated strips */
+  var gz = STORE.gz + 0.03;
+  var panes = [[STORE.x0, -1.72], [1.72, STORE.x1]];
+  for (var pgi = 0; pgi < panes.length; pgi++) {
+    var xa = panes[pgi][0], xb = panes[pgi][1];
+    if (xb - xa < 0.2) continue;
+    var stripes = Math.max(4, Math.round((xb - xa) / 1.4) * 4);
+    for (var s = 0; s < stripes; s++) {
+      var sx0 = xa + (xb - xa) * (s / stripes), sx1 = xa + (xb - xa) * ((s + 1) / stripes);
+      var phase = (s * 0.618) % 1;
+      oquad([sx0, 0.8, gz], [sx1, 0.8, gz], [sx1, 4.28, gz], [sx0, 4.28, gz], [0, 0, 1],
+            [0.72, 0.82, 0.95], 2, [phase, 0], 1, [0, 0], [1, 1]);
+    }
+  }
+  /* drips hanging under the canopy edge */
+  for (var d = 0; d < 26; d++) {
+    var dx = STORE.x0 + 0.1 + (d / 26) * (STORE.x1 - STORE.x0);
+    var dz = 6.9 + (d % 3) * 0.02;
+    var ph = (d * 0.37) % 1;
+    oquad([dx - 0.014, 3.9, dz], [dx + 0.014, 3.9, dz], [dx + 0.014, 4.9, dz], [dx - 0.014, 4.9, dz],
+          [0, 0, 1], [0.75, 0.85, 1.0], 3, [ph, 0], 1, [0, 0], [1, 1]);
+  }
+  var oData = new Float32Array(outCount * 13);
+  for (var v = 0; v < outCount; v++) {
+    var o = v * 13;
+    oData[o] = oP[v*3]; oData[o+1] = oP[v*3+1]; oData[o+2] = oP[v*3+2];
+    oData[o+3] = oN[v*3]; oData[o+4] = oN[v*3+1]; oData[o+5] = oN[v*3+2];
+    oData[o+6] = oU[v*2]; oData[o+7] = oU[v*2+1];
+    oData[o+8] = oC[v*3]; oData[o+9] = oC[v*3+1]; oData[o+10] = oC[v*3+2];
+    oData[o+11] = oK[v]; oData[o+12] = oB[v];
+  }
+  OUT_DATA = { data: oData, alpha: new Float32Array(oA), idx: new Uint32Array(indexOut), count: outCount };
+}
+/* @@PART2END@@ */
+
+/* @@PART3@@ */
+/* ==========================================================================
+   SHADERS
+   ========================================================================== */
+var VS_MAIN = `#version 300 es
+layout(location=0) in vec3 aPos;
+layout(location=1) in vec3 aNormal;
+layout(location=2) in vec2 aUV;
+layout(location=3) in vec3 aColor;
+layout(location=4) in float aMat;
+layout(location=5) in vec3 aEmis;
+layout(location=6) in float aGlow;
+uniform mat4 uVP;
+out vec3 vP; out vec3 vN; out vec3 vC; out vec2 vUV; out vec3 vE; out float vG;
+flat out int vMat;
+void main(){
+  vP = aPos; vN = aNormal; vC = aColor; vUV = aUV; vE = aEmis; vG = aGlow;
+  vMat = int(aMat + 0.5);
+  gl_Position = uVP * vec4(aPos, 1.0);
+}`;
+
+var FS_MAIN = `#version 300 es
+precision highp float;
+in vec3 vP; in vec3 vN; in vec3 vC; in vec2 vUV; in vec3 vE; in float vG;
+flat in int vMat;
+uniform vec3 uCam;
+uniform float uTime;
+uniform sampler2D uTex;
+uniform vec4 uL0; uniform vec3 uLc0; uniform vec4 uL1; uniform vec3 uLc1;
+uniform vec4 uL2; uniform vec3 uLc2; uniform vec4 uL3; uniform vec3 uLc3;
+uniform vec3 uFogCol;
+uniform float uFogDen;
+uniform float uFlicker;
+uniform float uToon;
+uniform vec4 uPud[8];
+uniform vec4 uSig;      // x: green traffic light, y: red traffic light, z: alley lantern
+out vec4 oCol;
+
+float hash12(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
+float vnoise(vec2 p){
+  vec2 i = floor(p), f = fract(p); vec2 u = f*f*(3.0-2.0*f);
+  return mix(mix(hash12(i), hash12(i+vec2(1,0)), u.x), mix(hash12(i+vec2(0,1)), hash12(i+vec2(1,1)), u.x), u.y);
+}
+vec3 envColor(vec3 d){
+  float h = clamp(d.y, -1.0, 1.0);
+  vec3 sky = mix(vec3(0.16,0.14,0.25), vec3(0.03,0.045,0.09), smoothstep(0.0,0.6,h));
+  vec3 grd = vec3(0.014,0.018,0.028);
+  return mix(grd, sky, smoothstep(-0.1, 0.05, h));
+}
+float puddleMask(vec2 uv){
+  float m = 0.0;
+  for (int i = 0; i < 8; i++){
+    vec4 e = uPud[i];
+    if (e.z <= 0.001) continue;
+    vec2 d = uv - e.xy;
+    float cs = cos(-e.w), sn = sin(-e.w);
+    vec2 r = vec2(d.x*cs - d.y*sn, d.x*sn + d.y*cs);
+    m = max(m, 1.0 - smoothstep(0.66, 1.0, length(r / e.z)));
+  }
+  return m;
+}
+/* stylised night-street reflection used on wet asphalt, paving and glass */
+vec3 streetRefl(vec2 q, float wob){
+  q.x += wob;
+  vec3 c = vec3(0.0);
+  float hz = 0.46 + 0.045*sin(q.x*1.1 + 2.0);
+  c += vec3(0.10,0.075,0.15) * smoothstep(hz+0.22, hz, q.y) * smoothstep(hz-0.26, hz, q.y);
+  vec2 cell = floor(q * vec2(20.0, 13.0));
+  float r = hash12(cell);
+  float winY = fract(q.y*13.0), winX = fract(q.x*20.0);
+  float bld = step(0.6, r) * step(hz, q.y + 0.06);
+  float win = step(0.56, winX) * step(winY, 0.5) * step(0.16, winY);
+  float litW = step(0.52, hash12(cell + 3.7));
+  c += bld * (vec3(0.035,0.04,0.058) + win*litW*vec3(0.62,0.44,0.21));
+  vec2 p1 = q - vec2(0.23, 0.49);
+  vec2 p2 = q - vec2(0.78, 0.51);
+  c += exp(-dot(p1,p1)*1500.0) * vec3(0.22,0.9,0.45) * 1.25 * uSig.x;
+  c += exp(-dot(p2,p2)*1500.0) * vec3(1.0,0.25,0.22) * 1.25 * uSig.y;
+  float s = vnoise(vec2(q.x*52.0, q.y*2.2 + uTime*0.06));
+  c += vec3(0.36,0.22,0.10) * pow(s, 3.2) * 0.85;
+  float s2 = vnoise(vec2(q.x*12.0, q.y*30.0 - uTime*0.1));
+  c += vec3(0.08,0.12,0.2) * pow(s2, 4.0);
+  return c;
+}
+vec3 toonBand(vec3 lc, float ndl){
+  float b = smoothstep(0.10, 0.22, ndl) * 0.40 + smoothstep(0.46, 0.60, ndl) * 0.60;
+  return lc * (0.13 + b);
+}
+void main(){
+  if (vMat == 5) {
+    vec3 d = normalize(vP);
+    vec3 s = mix(vec3(0.085,0.065,0.15), vec3(0.022,0.03,0.062), smoothstep(0.0,0.55,d.y));
+    s += vec3(0.10,0.05,0.11)*exp(-abs(d.y)*6.0)*0.75;
+    s += vec3(0.06,0.07,0.14)*pow(max(0.0, 1.0 - length(vec2(d.x, d.z*0.55))), 3.0);
+    oCol = vec4(s, 1.0); return;
+  }
+  vec3 N = normalize(vN);
+  vec3 V = normalize(uCam - vP);
+  vec3 base = vC;
+
+  /* ---- textured signs (emissive) ---- */
+  if (vMat == 6) {
+    vec4 t = texture(uTex, vUV);
+    float fl = (abs(vP.x - 9.9) < 1.0 && vP.y > 6.0) ? uFlicker : 1.0;
+    oCol = vec4(t.rgb * vE * mix(0.94, 1.06, fl) * fl, 1.0);
+    return;
+  }
+  if (vMat == 8) { /* coffee machine panel: emissive-ish texture */
+    vec4 t = texture(uTex, vUV);
+    oCol = vec4(t.rgb * (0.55 + vE.r * 0.9), 1.0);
+    return;
+  }
+  if (vMat == 9) { /* magazine covers strip */
+    vec4 t = texture(uTex, vec2(fract(vUV.x * 1.0), 0.62 + vUV.y * 0.16));
+    oCol = vec4(t.rgb * (0.5 + 0.5 * vE.r + 0.1), 1.0);
+    return;
+  }
+  /* ---- lit / emissive solids ---- */
+  if (vMat == 7) {
+    float fl = 1.0;
+    if (abs(vP.x - 9.9) < 1.0 && vP.y > 6.0) fl = uFlicker;
+    vec3 e = vE * vG;
+    vec3 c = vC * (0.55 + e * 0.9) + e * 0.35;
+    oCol = vec4(c * fl, 1.0);
+    return;
+  }
+  /* ---- glass ---- */
+  if (vMat == 3) {
+    vec3 R = reflect(-V, N);
+    vec3 env = envColor(R);
+    float fres = pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 3.0);
+    float colId = floor(vUV.x * 24.0);
+    float rnd = hash12(vec2(colId, 1.3));
+    float trav = fract(rnd + uTime * (0.028 + rnd * 0.05));
+    float dy = vUV.y - trav;
+    float drop = smoothstep(0.0, 0.035, dy) * (1.0 - smoothstep(0.035, 0.2, dy));
+    float beads = smoothstep(0.83, 1.0, hash12(floor(vUV * vec2(46.0, 30.0))));
+    beads *= 0.6 + 0.4 * sin(uTime * 1.6 + vUV.x * 31.0);
+    vec3 tint = vE;
+    vec3 col = env * 0.45 + tint * (0.7 + 0.6 * fres) + vec3(0.62,0.74,0.9) * (beads * 0.45 + drop * 0.75);
+    float a = clamp(0.05 + fres * 0.34 + beads * 0.28 + drop * 0.42, 0.0, 0.76);
+    oCol = vec4(col, a); return;
+  }
+
+  float up = clamp(N.y, 0.0, 1.0);
+  vec3 light = mix(vec3(0.075,0.09,0.15), vec3(0.14,0.135,0.225), up * 0.5 + 0.5) * 1.02;
+  vec4 lp[4]; vec3 lc[4];
+  lp[0]=uL0; lp[1]=uL1; lp[2]=uL2; lp[3]=uL3;
+  lc[0]=uLc0; lc[1]=uLc1; lc[2]=uLc2; lc[3]=uLc3;
+  lc[1] *= mix(0.4, 1.0, uFlicker);
+  vec3 spec = vec3(0.0);
+  for (int i = 0; i < 4; i++){
+    vec3 Lv = lp[i].xyz - vP;
+    float dist = length(Lv);
+    vec3 L = Lv / max(dist, 0.0001);
+    float att = clamp(1.0 - dist / max(lp[i].w, 0.001), 0.0, 1.0);
+    att = att * att;
+    float ndl = max(dot(N, L), 0.0);
+    light += toonBand(lc[i], ndl) * att;
+    vec3 Hv = normalize(L + V);
+    spec += lc[i] * att * pow(max(dot(N, Hv), 0.0), 70.0);
+  }
+  // interior warm room fill (konbini lights spilling everywhere inside)
+  if (vP.x > -6.2 && vP.x < 8.2 && vP.z > -8.8 && vP.z < 3.8 && vP.y > 0.4) {
+    light += vec3(1.0,0.85,0.64) * 0.6 * mix(0.8, 1.0, uFlicker);
+  }
+  light += vec3(0.16,0.19,0.28) * 0.32;
+
+  vec3 surf = base * light;
+
+  if (vMat == 4) {
+    surf = base * (light * 0.88 + vec3(0.025,0.03,0.03));
+    surf *= 0.9 + 0.2 * vnoise(vP.xz * 3.5);
+  }
+
+  if (vMat == 1 || vMat == 2) {
+    float grain = hash12(floor(vP.xz * 12.0));
+    surf *= mix(0.84, 1.08, grain);
+    if (vMat == 2) {
+      vec2 t = fract(vP.xz * 0.62);
+      float grout = min(min(t.x, 1.0 - t.x), min(t.y, 1.0 - t.y));
+      surf *= mix(0.74, 1.0, smoothstep(0.0, 0.07, grout));
+    }
+    float painted = smoothstep(0.62, 0.82, base.r) * smoothstep(0.62, 0.82, base.g) * (1.0 - smoothstep(0.1, 0.3, base.b));
+    vec2 uv = vP.xz;
+    vec2 q = vec2(uv.x * 0.05, uv.y * 0.148);
+    float wob = 0.055 * sin(uv.y * 0.8 + uTime * 0.55) + 0.03 * sin(uv.x * 1.9 - uTime * 0.35);
+    wob += 0.008 * sin(uv.x * 7.0 + uv.y * 5.0);
+    vec3 refl = streetRefl(q, wob);
+    float pud = puddleMask(uv);
+    float spill = smoothstep(9.5, 4.0, uv.y) * smoothstep(-9.0, -1.0, uv.y) * smoothstep(-9.0, -4.0, uv.x) * smoothstep(15.0, 6.0, uv.x);
+    refl += vec3(1.0,0.74,0.44) * spill * 0.42;
+    refl += vec3(0.9,0.7,0.4) * smoothstep(6.0, 7.2, uv.y) * smoothstep(-2.0, 3.0, uv.x) * smoothstep(6.0, 3.0, uv.x) * 0.25;
+    // light shimmer from the street lamps + traffic signal
+    float lampGlow = 0.0;
+    lampGlow += exp(-length(uv - vec2(11.0, 8.4)) * 0.55);
+    lampGlow += exp(-length(uv - vec2(-7.3, 8.4)) * 0.55);
+    lampGlow += exp(-length(uv - vec2(9.3, 8.4)) * 1.2) * 0.5;
+    refl += vec3(1.0,0.86,0.62) * lampGlow * 0.35;
+    float wet = mix(0.44, 1.0, pud);
+    wet *= (1.0 - painted * 0.55);
+    float fres = 0.14 + 0.5 * pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 3.0);
+    surf = mix(surf, surf * 0.36 + refl * (0.9 + pud * 1.1), clamp(wet * (0.42 + fres), 0.0, 0.94));
+    surf += vec3(0.55,0.66,0.85) * spec * (0.45 + pud * 0.7);
+    if (pud > 0.02) {
+      float rip = 0.0;
+      for (int k = 0; k < 4; k++){
+        float fk = float(k);
+        vec2 cc = vec2(hash12(vec2(fk, 2.3)), hash12(vec2(fk, 7.1))) * 2.0 - 1.0;
+        cc = uv * 0.38 + cc * 1.2;
+        float ph = fract(uTime * 0.62 + fk * 0.29);
+        float d = length(uv - cc * 2.6);
+        float ring = abs(fract(d * 0.55 + ph) - 0.5);
+        rip += smoothstep(0.06, 0.0, abs(ring - 0.44)) * (1.0 - ph);
+      }
+      surf += vec3(0.42,0.52,0.68) * rip * pud * 0.26;
+    }
+  } else {
+    surf += spec * 0.22 * (1.0 - up);
+  }
+
+  // fog to blend the diorama edges into the night
+  float dist = length(uCam - vP);
+  surf = mix(surf, uFogCol, 1.0 - exp(-dist * dist * uFogDen));
+  oCol = vec4(surf, 1.0);
+}`;
+
+/* --- transparent overlay: light pools / glass rain / canopy drips --- */
+var VS_OUT = `#version 300 es
+layout(location=0) in vec3 aPos;
+layout(location=1) in vec3 aNormal;
+layout(location=2) in vec2 aUV;
+layout(location=3) in vec3 aColor;
+layout(location=4) in float aKind;
+layout(location=5) in vec2 aPar;
+layout(location=6) in float aAlpha;
+uniform mat4 uVP;
+out vec3 vP; out vec2 vUV; out vec3 vC; out float vA; out vec2 vPar;
+flat out int vK;
+void main(){
+  vP = aPos; vUV = aUV; vC = aColor; vK = int(aKind + 0.5); vA = aAlpha; vPar = aPar;
+  gl_Position = uVP * vec4(aPos, 1.0);
+}`;
+var FS_OUT = `#version 300 es
+precision highp float;
+in vec3 vP; in vec2 vUV; in vec3 vC; in float vA; in vec2 vPar;
+flat in int vK;
+uniform float uTime;
+out vec4 oCol;
+float h21(vec2 p){ vec3 p3 = fract(vec3(p.xyx)*0.1031); p3 += dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
+void main(){
+  if (vK == 0) {
+    float d = length(vP.xz - vPar);
+    float a = exp(-d*d*0.55) * vA;
+    oCol = vec4(vC * 1.25, a * 0.32);
+    return;
+  }
+  if (vK == 2) {
+    // rain running down the storefront glass
+    float col = h21(vec2(vPar.x * 37.0, 1.7));
+    float trav = fract(col + uTime * (0.045 + col * 0.075));
+    float dy = vUV.y - trav;
+    float head = smoothstep(0.0, 0.006, dy) * (1.0 - smoothstep(0.006, 0.14, dy));
+    float trail = smoothstep(0.0, 0.02, dy) * (1.0 - smoothstep(0.02, 0.5, dy)) * 0.12;
+    float a = (head * 0.55 + trail) * step(0.25, col);
+    oCol = vec4(vec3(0.74,0.84,0.96) * a * 1.4, a * 0.9);
+    return;
+  }
+  // canopy drips
+  float t = fract(uTime * 0.85 + vPar.x);
+  float a = (1.0 - smoothstep(0.0, 0.16, abs(vUV.y - t))) * 0.65;
+  float y = mix(4.9, 3.9, vUV.y);
+  oCol = vec4(vec3(0.78,0.88,1.0) * a, a * (1.0 - abs(vUV.y - t) * 2.0));
+}`;
+
+/* --- rain streaks --- */
+var VS_RAIN = `#version 300 es
+layout(location=0) in vec4 aA; // x,y,z,life
+layout(location=1) in vec4 aB; // vx,vy,vz,seed
+uniform mat4 uVP;
+uniform vec2 uRes;
+out float vA;
+out float vSeed;
+void main(){
+  int vi = gl_VertexID >> 2;
+  int corner = gl_VertexID & 3;
+  vec3 pos = vec3(aA.x, aA.y, aA.z);
+  vec3 vel = vec3(aB.x, aB.y, aB.z);
+  float seed = aB.w;
+  float len = clamp(0.36 + seed * 0.5, 0.2, 0.85);
+  vec3 dir = normalize(vel + vec3(0.0, -0.0001, 0.0));
+  vec4 p0 = uVP * vec4(pos, 1.0);
+  vec4 p1 = uVP * vec4(pos - dir * len, 1.0);
+  float aspect = uRes.x / uRes.y;
+  vec2 s0 = p0.xy / max(p0.w, 0.0001), s1 = p1.xy / max(p1.w, 0.0001);
+  vec2 d = (s1 - s0) * vec2(aspect, 1.0);
+  d = length(d) > 1e-5 ? normalize(d) : vec2(0.0, 1.0);
+  vec2 perp = vec2(-d.y, d.x) * vec2(1.0 / aspect, 1.0) * 0.0019;
+  vec4 pp = (corner == 0 || corner == 1) ? p0 : p1;
+  vec2 off = (corner == 0 || corner == 2) ? perp : -perp;
+  gl_Position = pp;
+  gl_Position.xy += off * pp.w;
+  vA = aA.w;
+  vSeed = seed;
+}`;
+var FS_RAIN = `#version 300 es
+precision mediump float;
+in float vA; in float vSeed;
+out vec4 oCol;
+void main(){
+  float a = 0.13 + 0.14 * fract(vSeed * 7.31);
+  oCol = vec4(0.60, 0.72, 0.94, a * vA);
+}`;
+
+/* --- post: depth-edge toon line + bloom + grade --- */
+var VS_QUAD = `#version 300 es
+out vec2 vUv;
+void main(){
+  vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
+  vUv = p;
+  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+}`;
+var FS_POST = `#version 300 es
+precision highp float;
+in vec2 vUv;
+uniform sampler2D uColor;
+uniform sampler2D uDepth;
+uniform vec2 uRes;
+uniform float uNear, uFar;
+uniform float uToon;
+uniform float uLine;
+uniform float uTime;
+out vec4 oCol;
+float linDepth(float d){ float z = d * 2.0 - 1.0; return (2.0*uNear*uFar) / (uFar + uNear - z*(uFar - uNear)); }
+float edgeCurv(vec2 uv){
+  vec2 px = 1.0 / uRes;
+  float c = linDepth(texture(uDepth, uv).r);
+  float l = linDepth(texture(uDepth, uv + vec2(-px.x, 0.0)).r);
+  float r = linDepth(texture(uDepth, uv + vec2( px.x, 0.0)).r);
+  float u = linDepth(texture(uDepth, uv + vec2(0.0, -px.y)).r);
+  float d = linDepth(texture(uDepth, uv + vec2(0.0,  px.y)).r);
+  float dc = abs(l - c) / max(min(l, c), 1e-3) + abs(r - c) / max(min(r, c), 1e-3)
+           + abs(u - c) / max(min(u, c), 1e-3) + abs(d - c) / max(min(d, c), 1e-3);
+  return dc;
+}
+vec3 aces(vec3 x){ return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14), 0.0, 1.0); }
+void main(){
+  vec2 px = 1.0 / uRes;
+  vec3 col = texture(uColor, vUv).rgb;
+  float depth = texture(uDepth, vUv).r;
+  if (depth >= 0.999999) {
+    vec2 c = (vUv - vec2(0.5, 0.54)) * vec2(1.0, 1.3);
+    float g = exp(-dot(c, c) * 2.6);
+    col = vec3(0.016, 0.021, 0.038) + vec3(0.045, 0.04, 0.07) * g + vec3(0.012, 0.008, 0.02) * g * g;
+  } else if (uToon > 0.5) {
+    float e = edgeCurv(vUv);
+    float line = smoothstep(0.11, 0.42, e * uLine);
+    col *= 1.0 - line * 0.62;
+  }
+  // bloom: 8-tap ring at two radii
+  vec3 bl = vec3(0.0);
+  for (int i = 0; i < 8; i++){
+    float a = float(i) * 0.785398;
+    vec2 o = vec2(cos(a), sin(a));
+    bl += texture(uColor, vUv + o * px * 5.0).rgb * 0.055;
+    bl += texture(uColor, vUv + o * px * 13.0).rgb * 0.032;
+  }
+  col += max(bl - 0.55, 0.0) * 0.6;
+  // subtle vignette + filmic ceiling
+  float vig = smoothstep(1.25, 0.35, length((vUv - 0.5) * vec2(1.08, 1.0)) * 1.35);
+  col *= mix(0.62, 1.0, vig);
+  col = aces(col * 1.06);
+  col = pow(col, vec3(0.95));
+  oCol = vec4(col, 1.0);
+}`;
+
+function compile(type, src) {
+  var s = gl.createShader(type);
+  gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+    var log = gl.getShaderInfoLog(s);
+    gl.deleteShader(s);
+    throw new Error("shader compile: " + log);
+  }
+  return s;
+}
+function program(vsSrc, fsSrc) {
+  var v = compile(gl.VERTEX_SHADER, vsSrc), f = compile(gl.FRAGMENT_SHADER, fsSrc);
+  var p = gl.createProgram();
+  gl.attachShader(p, v); gl.attachShader(p, f); gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error("link: " + gl.getProgramInfoLog(p));
+  gl.deleteShader(v); gl.deleteShader(f);
+  return p;
+}
+function uloc(p, names) {
+  var o = {};
+  for (var i = 0; i < names.length; i++) o[names[i]] = gl.getUniformLocation(p, names[i]);
+  return o;
+}
+
+/* ==========================================================================
+   GPU STATE
+   ========================================================================== */
+var P = {}, U = {};
+var vao = null, vbo = null, ibo = null, indexCount = 0;
+var outVAO = null, outVBO = null, outIBO = null, outIndexCount = 0, outVCount = 0;
+var rainVAO = null, rainVBO = null, rainData = null;
+var quadVAO = null, emptyVAO = null;
+var fbo = null, texColor = null, texDepth = null, fbW = 2, fbH = 2;
+var texSign = null;
+var NEAR = 0.9, FAR = 240;
+var VP = new Float32Array(16);
+var camPos = [0, 20, 40];
+
+var RAIN_N = 3400;
+
+function uploadTexture(img, repeat) {
+  var t = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+  gl.generateMipmap(gl.TEXTURE_2D);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, repeat ? gl.REPEAT : gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, repeat ? gl.REPEAT : gl.CLAMP_TO_EDGE);
+  var ext = gl.getExtension("EXT_texture_filter_anisotropic");
+  if (ext) {
+    var mx = gl.getParameter(ext.MAX_TEXTURE_MAX_ANISOTROPY_EXT);
+    gl.texParameterf(gl.TEXTURE_2D, ext.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(4, mx));
+  }
+  return t;
+}
+
+function uploadStaticMesh() {
+  var n = vcount;
+  var data = new Float32Array(n * STR);
+  for (var i = 0; i < n; i++) {
+    var o = i * STR, p = i * 3, q = i * 2;
+    data[o] = gP[p]; data[o+1] = gP[p+1]; data[o+2] = gP[p+2];
+    data[o+3] = gN[p]; data[o+4] = gN[p+1]; data[o+5] = gN[p+2];
+    data[o+6] = gU[q]; data[o+7] = gU[q+1];
+    data[o+8] = gC[p]; data[o+9] = gC[p+1]; data[o+10] = gC[p+2];
+    data[o+11] = gM[i];
+    data[o+12] = gE[p]; data[o+13] = gE[p+1]; data[o+14] = gE[p+2];
+    data[o+15] = gG[i];
+  }
+  vao = gl.createVertexArray();
+  gl.bindVertexArray(vao);
+  vbo = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+  gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);   // dynamic: the door leaves move
+  var S = STR * 4;
+  gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, S, 0);
+  gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, S, 12);
+  gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 2, gl.FLOAT, false, S, 24);
+  gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 3, gl.FLOAT, false, S, 32);
+  gl.enableVertexAttribArray(4); gl.vertexAttribPointer(4, 1, gl.FLOAT, false, S, 44);
+  gl.enableVertexAttribArray(5); gl.vertexAttribPointer(5, 3, gl.FLOAT, false, S, 48);
+  gl.enableVertexAttribArray(6); gl.vertexAttribPointer(6, 1, gl.FLOAT, false, S, 60);
+  ibo = gl.createBuffer();
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
+  var idxU = new Uint32Array(idx);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idxU, gl.STATIC_DRAW);
+  indexCount = idxU.length;
+  gl.bindVertexArray(null);
+  staticPos = data;   // keep the source around to recompute the door leaves
+}
+var staticPos = null;
+
+function uploadOverlay() {
+  var d = OUT_DATA;
+  outVCount = d.count;
+  var n = d.count;
+  var buf = new Float32Array(n * 13);
+  for (var i = 0; i < n; i++) {
+    buf[i*13] = d.data[i*13];
+    buf[i*13+1] = d.data[i*13+1];
+    buf[i*13+2] = d.data[i*13+2];
+    buf[i*13+3] = d.data[i*13+3];
+    buf[i*13+4] = d.data[i*13+4];
+    buf[i*13+5] = d.data[i*13+5];
+    buf[i*13+6] = d.data[i*13+6];
+    buf[i*13+7] = d.data[i*13+7];
+    buf[i*13+8] = d.data[i*13+8];
+    buf[i*13+9] = d.data[i*13+9];
+    buf[i*13+10] = d.data[i*13+10];
+    buf[i*13+11] = d.data[i*13+11];
+    buf[i*13+12] = d.alpha[i];
+  }
+  outVAO = gl.createVertexArray();
+  gl.bindVertexArray(outVAO);
+  outVBO = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, outVBO);
+  gl.bufferData(gl.ARRAY_BUFFER, buf, gl.STATIC_DRAW);
+  var S = 13 * 4;
+  gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, S, 0);
+  gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, S, 12);
+  gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 2, gl.FLOAT, false, S, 24);
+  gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 3, gl.FLOAT, false, S, 32);
+  gl.enableVertexAttribArray(4); gl.vertexAttribPointer(4, 1, gl.FLOAT, false, S, 44);
+  gl.enableVertexAttribArray(5); gl.vertexAttribPointer(5, 1, gl.FLOAT, false, S, 48);
+  gl.enableVertexAttribArray(6); gl.vertexAttribPointer(6, 1, gl.FLOAT, false, S, 48);
+  outIBO = gl.createBuffer();
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, outIBO);
+  var oi = new Uint32Array(d.idx);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, oi, gl.STATIC_DRAW);
+  outIndexCount = oi.length;
+  gl.bindVertexArray(null);
+}
+
+function initRain() {
+  rainData = new Float32Array(RAIN_N * 8);
+  for (var i = 0; i < RAIN_N; i++) resetDrop(i, true);
+  rainVAO = gl.createVertexArray();
+  gl.bindVertexArray(rainVAO);
+  rainVBO = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, rainVBO);
+  gl.bufferData(gl.ARRAY_BUFFER, rainData, gl.DYNAMIC_DRAW);
+  gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 4, gl.FLOAT, false, 32, 0);
+  gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 32, 16);
+  gl.bindVertexArray(null);
+}
+function resetDrop(i, init) {
+  var o = i * 8;
+  var x, z;
+  do {
+    x = Math.random() * 47 - 23.5;
+    z = Math.random() * 47 - 23.5;
+  } while (x > -6.5 && x < 8.5 && z > -9.0 && z < 4.1);
+  rainData[o] = x;
+  rainData[o + 1] = init ? Math.random() * 22 - 2 : 15 + Math.random() * 10;
+  rainData[o + 2] = z;
+  rainData[o + 3] = 1.0;
+  rainData[o + 4] = 0.42 + Math.random() * 0.25;
+  rainData[o + 5] = -15 - Math.random() * 7;
+  rainData[o + 6] = 0.18 + Math.random() * 0.12;
+  rainData[o + 7] = Math.random();
+}
+function updateRain(dt) {
+  var R = rainData;
+  for (var i = 0; i < RAIN_N; i++) {
+    var o = i * 8;
+    R[o] += R[o + 4] * dt;
+    R[o + 1] += R[o + 5] * dt;
+    R[o + 2] += R[o + 6] * dt;
+    var x = R[o], z = R[o + 2];
+    var floorY = -0.2;
+    if (x > -9.5 && x < 20.1 && z > 8.6) floorY = 0.35;
+    else if (x > -9.5 && x < -9.0) floorY = 0.35;
+    if (R[o + 1] < floorY || x > 25 || x < -25 || z > 25 || z < -25) resetDrop(i, false);
+  }
+  gl.bindBuffer(gl.ARRAY_BUFFER, rainVBO);
+  gl.bufferSubData(gl.ARRAY_BUFFER, 0, rainData);
+}
+
+function makeTargets(w, h) {
+  if (fbo) { gl.deleteFramebuffer(fbo); gl.deleteTexture(texColor); gl.deleteTexture(texDepth); }
+  texColor = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, texColor);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  texDepth = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, texDepth);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.DEPTH_COMPONENT24, w, h, 0, gl.DEPTH_COMPONENT, gl.UNSIGNED_INT, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  fbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texColor, 0);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, texDepth, 0);
+  var st = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  if (st !== gl.FRAMEBUFFER_COMPLETE) console.warn("framebuffer incomplete 0x" + st.toString(16));
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  fbW = w; fbH = h;
+}
+function resize(force) {
+  var dpr = Math.min(window.devicePixelRatio || 1, dprCap);
+  var w = Math.max(64, Math.round(canvas.clientWidth * dpr));
+  var h = Math.max(64, Math.round(canvas.clientHeight * dpr));
+  var cap = 1700;
+  if (w > cap) { h = Math.round(h * cap / w); w = cap; }
+  if (h > cap * 1.4) { w = Math.round(w * cap * 1.4 / h); h = Math.round(cap * 1.4); }
+  if (force || canvas.width !== w || canvas.height !== h) {
+    canvas.width = w; canvas.height = h;
+    makeTargets(w, h);
+  }
+}
+
+/* ==========================================================================
+   CAMERA
+   ========================================================================== */
+var cam = {
+  yaw: -0.50, pitch: 0.50, dist: 58,
+  tyaw: -0.50, tpitch: 0.50, tdist: 58,
+  target: [0.8, 2.0, 1.2], ttarget: [0.8, 2.0, 1.2]
+};
+var HOME = { yaw: -0.50, pitch: 0.50, tx: 0.8, ty: 2.0, tz: 1.2 };
+var MIN_D = 11, MAX_D = 150;
+function fitDist() {
+  var asp = canvas.clientWidth / Math.max(canvas.clientHeight, 1);
+  var d = 56;
+  if (asp < 1.2) d = 56 * Math.pow(1.2 / Math.max(asp, 0.42), 0.9);
+  return Math.min(120, d);
+}
+function resetView() {
+  cam.tyaw = HOME.yaw; cam.tpitch = HOME.pitch; cam.tdist = fitDist();
+  cam.ttarget = [HOME.tx, HOME.ty, HOME.tz];
+}
+function clampTarget() {
+  cam.ttarget[0] = clamp(cam.ttarget[0], -9, 11);
+  cam.ttarget[1] = clamp(cam.ttarget[1], 0.6, 7);
+  cam.ttarget[2] = clamp(cam.ttarget[2], -9, 11);
+}
+function panBy(dx, dy) {
+  var s = cam.tdist * 0.0015;
+  var cy = Math.cos(cam.yaw), sy = Math.sin(cam.yaw), cp = Math.max(Math.cos(cam.pitch), 0.3);
+  cam.ttarget[0] -= (cy * dx - sy * dy / cp) * s;
+  cam.ttarget[2] += (sy * dx + cy * dy / cp) * s;
+  clampTarget();
+}
+function updateCamera(dt) {
+  var k = 1 - Math.exp(-dt * 9.0);
+  cam.yaw += (cam.tyaw - cam.yaw) * k;
+  cam.pitch += (cam.tpitch - cam.pitch) * k;
+  cam.dist += (cam.tdist - cam.dist) * k;
+  for (var i = 0; i < 3; i++) cam.target[i] += (cam.ttarget[i] - cam.target[i]) * k;
+}
+function computeVP() {
+  var cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
+  var e = [cam.target[0] + cam.dist * cp * Math.sin(cam.yaw),
+           cam.target[1] + cam.dist * sp,
+           cam.target[2] + cam.dist * cp * Math.cos(cam.yaw)];
+  camPos = e;
+  var asp = fbW / fbH;
+  var fov = asp < 1.0 ? 0.84 : 0.66;
+  var Pj = mPersp(fov, asp, NEAR, FAR);
+  var Vw = mLook(e, cam.target, [0, 1, 0]);
+  VP = mMul(Pj, Vw);
+}
+
+/* ==========================================================================
+   INPUT
+   ========================================================================== */
+var touches = [], ptr = { down: false, x: 0, y: 0, btn: 0 };
+var lastPinch = 0, lastMid = [0, 0];
+canvas.addEventListener("pointerdown", function (e) {
+  try { canvas.focus({ preventScroll: true }); } catch (_) {}
+  try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+  if (e.pointerType === "touch") {
+    touches.push({ id: e.pointerId, x: e.clientX, y: e.clientY });
+    if (touches.length === 1) lastMid = [e.clientX, e.clientY];
+    if (touches.length === 2) {
+      lastPinch = Math.hypot(touches[0].x - touches[1].x, touches[0].y - touches[1].y);
+      lastMid = [(touches[0].x + touches[1].x) / 2, (touches[0].y + touches[1].y) / 2];
+    }
+    e.preventDefault();
+    return;
+  }
+  ptr.down = true; ptr.x = e.clientX; ptr.y = e.clientY; ptr.btn = e.button;
+  canvas.classList.add("dragging");
+  e.preventDefault();
+});
+canvas.addEventListener("pointermove", function (e) {
+  if (e.pointerType === "touch") {
+    for (var i = 0; i < touches.length; i++) if (touches[i].id === e.pointerId) { touches[i].x = e.clientX; touches[i].y = e.clientY; }
+    if (touches.length === 1) {
+      var dx = e.clientX - lastMid[0], dy = e.clientY - lastMid[1];
+      lastMid = [e.clientX, e.clientY];
+      cam.tyaw -= dx * 0.0085;
+      cam.tpitch = clamp(cam.tpitch + dy * 0.0055, 0.10, 1.40);
+    } else if (touches.length >= 2) {
+      var d = Math.hypot(touches[0].x - touches[1].x, touches[0].y - touches[1].y);
+      var mid = [(touches[0].x + touches[1].x) / 2, (touches[0].y + touches[1].y) / 2];
+      if (lastPinch > 0) cam.tdist = clamp(cam.tdist * lastPinch / Math.max(d, 1), MIN_D, MAX_D);
+      lastPinch = d;
+      panBy(mid[0] - lastMid[0], mid[1] - lastMid[1]);
+      lastMid = mid;
+    }
+    return;
+  }
+  if (!ptr.down) return;
+  var mx = e.clientX - ptr.x, my = e.clientY - ptr.y;
+  ptr.x = e.clientX; ptr.y = e.clientY;
+  if (ptr.btn === 2 || e.shiftKey || e.ctrlKey || e.metaKey) panBy(mx, my);
+  else {
+    cam.tyaw -= mx * 0.0072;
+    cam.tpitch = clamp(cam.tpitch + my * 0.0048, 0.10, 1.40);
+  }
+});
+function releasePtr(e) {
+  if (e.pointerType === "touch") {
+    touches = touches.filter(function (t) { return t.id !== e.pointerId; });
+    if (touches.length < 2) lastPinch = 0;
+    return;
+  }
+  ptr.down = false;
+  canvas.classList.remove("dragging");
+}
+canvas.addEventListener("pointerup", releasePtr);
+canvas.addEventListener("pointercancel", releasePtr);
+canvas.addEventListener("wheel", function (e) {
+  e.preventDefault();
+  var dy = e.deltaY * (e.deltaMode === 1 ? 16 : (e.deltaMode === 2 ? 400 : 1));
+  cam.tdist = clamp(cam.tdist * Math.exp(dy * 0.00105), MIN_D, MAX_D);
+}, { passive: false });
+canvas.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+canvas.addEventListener("dblclick", function (e) { e.preventDefault(); resetView(); });
+canvas.addEventListener("keydown", function (e) {
+  var k = e.key, used = true, step = e.shiftKey ? 0.10 : 0.05;
+  switch (k) {
+    case "ArrowLeft": cam.tyaw += step; break;
+    case "ArrowRight": cam.tyaw -= step; break;
+    case "ArrowUp":
+      if (e.shiftKey) { cam.ttarget[1] = clamp(cam.ttarget[1] + 0.3, 0.6, 7); }
+      else cam.tpitch = clamp(cam.tpitch + step, 0.10, 1.40);
+      break;
+    case "ArrowDown":
+      if (e.shiftKey) { cam.ttarget[1] = clamp(cam.ttarget[1] - 0.3, 0.6, 7); }
+      else cam.tpitch = clamp(cam.tpitch - step, 0.10, 1.40);
+      break;
+    case "PageUp": cam.tdist = clamp(cam.tdist * 0.88, MIN_D, MAX_D); break;
+    case "PageDown": cam.tdist = clamp(cam.tdist * 1.14, MIN_D, MAX_D); break;
+    case "+": case "=": case "Add": cam.tdist = clamp(cam.tdist * 0.9, MIN_D, MAX_D); break;
+    case "-": case "_": case "Subtract": cam.tdist = clamp(cam.tdist * 1.1, MIN_D, MAX_D); break;
+    case "r": case "R": resetView(); break;
+    case "m": case "M": animON = !animON; break;
+    case "p": case "P": doCapture(); break;
+    default: used = false;
+  }
+  if (used) e.preventDefault();
+});
+window.addEventListener("keydown", function (e) {
+  if (document.activeElement === canvas) return;
+  if (e.key === "r" || e.key === "R") resetView();
+});
+
+/* capture the current frame as a downloadable PNG (sandbox may block it) */
+function doCapture() {
+  try {
+    renderFrame(0, true);
+    var url = canvas.toDataURL("image/png");
+    var a = document.createElement("a");
+    a.href = url; a.download = "yoru-konbini-diorama.png";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  } catch (err) { console.warn("capture unavailable", err); }
+}
+
+/* ==========================================================================
+   ANIMATION STATE
+   ========================================================================== */
+var flick = 1.0, flickT = 0;
+var door = { amount: 0, phase: -1, next: 5.0 };
+var sig = { green: 1, red: 1, amber: 0 };
+var dynLights = [0, 0, 0, 0];
+var doorDirty = false;
+var lastNow = 0, fpsAcc = 0, fpsN = 0;
+
+function updateAnim(dt) {
+  // sign tube flicker: mostly steady, with brief stutters
+  flickT += dt;
+  var f = Math.sin(flickT * 13.0) + Math.sin(flickT * 37.3 + 1.1) + Math.sin(flickT * 71.7 + 2.3);
+  var dip = (f > 2.55) ? 0.62 : 1.0;
+  if (Math.sin(flickT * 0.41) > 0.985) dip *= 0.55;
+  flick += (dip - flick) * Math.min(1, dt * 22);
+  // automatic door
+  if (animON) {
+    if (door.phase < 0) {
+      if (T > door.next) { door.phase = 0; }
+    } else {
+      door.phase += dt;
+      var ph = door.phase, target = 0;
+      if (ph < 1.3) target = ph / 1.3;
+      else if (ph < 3.4) target = 1;
+      else if (ph < 5.0) target = 1 - (ph - 3.4) / 1.6;
+      else { target = 0; door.phase = -1; door.next = T + 8 + Math.random() * 10; }
+      door.amount = target;
+    }
+    if (door.amount > 0.0005) doorDirty = true;
+  }
+}
+/* shift the sliding-door leaf vertices in the shared vertex buffer */
+function applyDoor() {
+  if (!doorDirty || !DOOR.orig) return;
+  doorDirty = false;
+  var a = DOOR.range[0], b = DOOR.range[1], half = (a + b) >> 1;
+  var n = b - a;
+  var buf = new Float32Array(n * STR);
+  for (var i = 0; i < n; i++) {
+    var vi = a + i;
+    var shift = (vi < half) ? (door.amount * 1.42) : (-door.amount * 1.42);
+    var src = i * STR, s3 = i * 3;
+    buf[src] = DOOR.orig[s3] + shift;
+    buf[src+1] = DOOR.orig[s3+1];
+    buf[src+2] = DOOR.orig[s3+2];
+    buf[src+3] = DOOR.orig[s3];     // normal x kept; door geometry stays axis aligned
+    buf[src+4] = DOOR.orig[s3+1];
+    buf[src+5] = DOOR.orig[s3+2];
+    // copy the remaining attribute floats straight from the static buffer
+    for (var f = 3; f < STR; f++) buf[src + f] = staticPos[src + f];
+    buf[src+3] = staticPos[src+3]; buf[src+4] = staticPos[src+4]; buf[src+5] = staticPos[src+5];
+  }
+  gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+  gl.bufferSubData(gl.ARRAY_BUFFER, a * STR * 4, buf);
+}
+
+/* four analytic lights follow the most meaningful sources */
+function pickLights() {
+  return [
+    [4.6, 2.6, 1.0, 15.0],     // storefront pylon lamp (flickers)
+    [10.4, 6.4, 8.3, 17.0],    // street lamp right
+    [-7.3, 6.4, 8.3, 15.0],    // street lamp left
+    [3.2, 1.9, 7.0, 8.0]       // vending machines
+  ];
+}
+
+/* ==========================================================================
+   RENDER
+   ========================================================================== */
+var outData = new Float32Array(48);
+function renderFrame(dt, isCapture) {
+  computeVP();
+  var lights = pickLights();
+  if (doorDirty) applyDoor();
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.viewport(0, 0, fbW, fbH);
+  gl.clearColor(0.015, 0.02, 0.04, 1);
+  gl.clearDepth(1.0);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  gl.enable(gl.DEPTH_TEST);
+  gl.depthFunc(gl.LEQUAL);
+  gl.depthMask(true);
+  gl.disable(gl.CULL_FACE);
+  gl.disable(gl.BLEND);
+
+  /* opaque */
+  gl.useProgram(P.main);
+  gl.uniformMatrix4fv(U.main.uVP, false, VP);
+  gl.uniform3fv(U.main.uCam, camPos);
+  gl.uniform1f(U.main.uTime, RT);
+  gl.uniform1f(U.main.uFlicker, flick);
+  gl.uniform3f(U.main.uFogCol, 0.028, 0.038, 0.068);
+  gl.uniform1f(U.main.uFogDen, 0.000026);
+  gl.uniform1f(U.main.uToon, toonOn ? 1 : 0);
+  gl.uniform4fv(U.main.uPud, PUD_GEO);
+  gl.uniform4f(U.main.uSig, sig.green, sig.red, 1, 0);
+  var lc = [
+    [1.0, 0.94, 0.8],
+    [1.0, 0.82, 0.58],
+    [1.0, 0.82, 0.58],
+    [0.55, 0.74, 1.0]
+  ];
+  for (var i = 0; i < 4; i++) {
+    gl.uniform4f(U.main["uL" + i], lights[i][0], lights[i][1], lights[i][2], lights[i][3]);
+    gl.uniform3f(U.main["uLc" + i], lc[i][0], lc[i][1], lc[i][2]);
+  }
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, texSign);
+  gl.uniform1i(U.main.uTex, 0);
+  gl.bindVertexArray(vao);
+  gl.drawElements(gl.TRIANGLES, indexCount, gl.UNSIGNED_INT, 0);
+  gl.bindVertexArray(null);
+
+  /* transparent overlay */
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+  gl.depthMask(false);
+  gl.useProgram(P.out);
+  gl.uniformMatrix4fv(U.out.uVP, false, VP);
+  gl.uniform1f(U.out.uTime, RT);
+  gl.bindVertexArray(outVAO);
+  gl.drawElements(gl.TRIANGLES, outIndexCount, gl.UNSIGNED_INT, 0);
+  gl.bindVertexArray(null);
+
+  /* rain: 4 vertices per drop through gl_VertexID, one instance per drop */
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+  gl.useProgram(P.rain);
+  gl.uniformMatrix4fv(U.rain.uVP, false, VP);
+  gl.uniform2f(U.rain.uRes, fbW, fbH);
+  gl.bindVertexArray(rainVAO);
+  gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, RAIN_N);
+  gl.bindVertexArray(null);
+  gl.depthMask(true);
+  gl.disable(gl.BLEND);
+
+  /* post to the canvas */
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.disable(gl.DEPTH_TEST);
+  gl.useProgram(P.post);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, texColor); gl.uniform1i(P0, 0);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, texDepth); gl.uniform1i(P1, 1);
+  gl.uniform2f(Q.res, fbW, fbH);
+  gl.uniform1f(Q.near, NEAR);
+  gl.uniform1f(Q.far, FAR);
+  gl.uniform1f(Q.toon, toonOn ? 1 : 0);
+  gl.uniform1f(Q.line, 1.0);
+  gl.bindVertexArray(quadVAO);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  gl.bindVertexArray(null);
+}
+var P0 = null, P1 = null, Q = {};
+
+/* ==========================================================================
+   BOOT
+   ========================================================================== */
+function initGL() {
+  var atlasCanvas = mkCanvas(1024, 1024);
+  drawSignAtlas(atlasCanvas);
+  texSign = uploadTexture(atlasCanvas, false);
+
+  buildScene();
+  uploadStaticMesh();
+  uploadOverlay();
+  initRain();
+
+  P.main = program(VS_MAIN, FS_MAIN);
+  P.out = program(VS_OUT, FS_OUT);
+  P.rain = program(VS_RAIN, FS_RAIN);
+  P.post = program(VS_QUAD, FS_POST);
+  U.main = uloc(P.main, ["uVP","uCam","uTime","uTex","uFogCol","uFogDen","uFlicker","uToon","uPud","uSig",
+    "uL0","uLc0","uL1","uLc1","uL2","uLc2","uL3","uLc3"]);
+  U.out = uloc(P.out, ["uVP","uTime"]);
+  U.rain = uloc(P.rain, ["uVP","uRes"]);
+  P0 = gl.getUniformLocation(P.post, "uColor");
+  P1 = gl.getUniformLocation(P.post, "uDepth");
+  Q.res = gl.getUniformLocation(P.post, "uRes");
+  Q.near = gl.getUniformLocation(P.post, "uNear");
+  Q.far = gl.getUniformLocation(P.post, "uFar");
+  Q.toon = gl.getUniformLocation(P.post, "uToon");
+  Q.line = gl.getUniformLocation(P.post, "uLine");
+
+  quadVAO = gl.createVertexArray();
+  resize(true);
+}
+
+function frame(now) {
+  if (!lastNow) lastNow = now;
+  var dtRaw = Math.min(0.05, Math.max(0, (now - lastNow) / 1000));
+  lastNow = now;
+  var dt = dtRaw * (animON ? timeScale : 0.25);
+  T += dt; RT += animON ? dt : dt * 0.6;
+  updateAnim(dtRaw);
+  updateRain(animON ? dtRaw * timeScale : dtRaw * 0.12);
+  updateCamera(dtRaw);
+  if (animON) applyDoor();
+  renderFrame(dtRaw, false);
+  requestAnimationFrame(frame);
+}
+
+try {
+  initGL();
+} catch (err) {
+  console.error(err);
+  fail("三维场景初始化失败，请使用较新的浏览器重试。");
+  return;
+}
+
+window.addEventListener("resize", function () { resize(false); });
+if (window.ResizeObserver) {
+  try { new ResizeObserver(function () { resize(false); }).observe(canvas); } catch (_) {}
+}
+if (mqReduce && mqReduce.addEventListener) {
+  try {
+    mqReduce.addEventListener("change", function (e) {
+      reduced = e.matches;
+      animON = !reduced;
+      if (!animON) { door.amount = 0; door.phase = -1; doorDirty = true; applyDoor(); }
+    });
+  } catch (_) {}
+}
+resetView();
+cam.dist = cam.tdist; cam.pitch = cam.tpitch; cam.yaw = cam.tyaw;
+cam.target = cam.ttarget.slice();
+requestAnimationFrame(frame);
+/* @@PART3END@@ */
+})();
+</script>
+</body>
+</html>

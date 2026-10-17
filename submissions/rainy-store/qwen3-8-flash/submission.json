@@ -1,0 +1,15 @@
+{
+    "schema_version": 1,
+    "task": "rainy-store",
+    "model": "qwen3-8-flash",
+    "model_version": "填写确切模型版本",
+    "revisions": [
+        {
+            "id": "v1",
+            "effective_from": "2026-10-19",
+            "directory": "revisions/v1",
+            "note": "初次提交",
+            "prompt_sha256": "8f4ed26323729e640ee7daf748b21eb583c05236795c18aeeaaa637ecd411d91"
+        }
+    ]
+}

@@ -1,0 +1,539 @@
+<!doctype html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+    <meta name="theme-color" content="#101629">
+    <title>月灯り MART · 雨夜街角微缩景观</title>
+    <style>
+        :root {
+            color-scheme: dark
+        }
+
+        * {
+            box-sizing: border-box
+        }
+
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            overflow: hidden;
+            background: #101629
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            touch-action: none;
+            outline: none;
+            cursor: grab
+        }
+
+        canvas:active {
+            cursor: grabbing
+        }
+
+        @media(prefers-reduced-motion:reduce) {
+            canvas {
+                scroll-behavior: auto
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <canvas id="world" tabindex="0" role="img"
+        aria-label="雨夜日本便利店微缩三维街角。拖动旋转；右键拖动或 Shift 加拖动平移；滚轮或双指缩放；键盘方向键旋转、WASD 平移、加减号缩放、Home 复位。"></canvas>
+    <script>
+        (() => {
+            'use strict';
+            const canvas = document.getElementById('world'), ctx = canvas.getContext('2d', { alpha: false });
+            const PI = Math.PI, TAU = 2 * PI, MIN = Math.min, MAX = Math.max;
+            const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+            const V = (x, y, z) => [x, y, z], clamp = (a, l, h) => MAX(l, MIN(h, a)), mix = (a, b, t) => a + (b - a) * t;
+            const rand = (s) => { let t = s >>> 0; return () => { t = (Math.imul(t, 1664525) + 1013904223) >>> 0; return t / 4294967296 } };
+            const random = rand(20261017), between = (a, b) => a + (b - a) * random();
+            let W = 1, H = 1, dpr = 1, t = 0, previous = 0, frame = 0;
+            const home = { yaw: .70, pitch: .56, zoom: 1, panX: 0, panY: 0 };
+            const cam = { ...home };
+            const faces = [], overlays = [], lights = [], drops = [], ripples = [];
+            const palette = { edge: '#162336', foundation: '#172132', road: '#26344b', side: '#61717d', wall: '#d0d9d6', cream: '#f0ead8', ink: '#152638', teal: '#2d8293', aqua: '#8fe0d6', gold: '#ffd8a0', red: '#d8667d', blue: '#417eab' };
+            function cssHex(color, mul = 1) { if (!color.startsWith('#') || color.length !== 7) return color; let v = parseInt(color.slice(1), 16); let r = clamp(((v >> 16) & 255) * mul, 0, 255) | 0, g = clamp(((v >> 8) & 255) * mul, 0, 255) | 0, b = clamp((v & 255) * mul, 0, 255) | 0; return `rgb(${r},${g},${b})` }
+            function face(pts, color, stroke = 'rgba(12,24,43,.54)', lw = .72, alpha = 1, extra = {}) { faces.push({ kind: 'poly', pts, color, stroke, lw, alpha, ...extra }) }
+            function line(pts, color, width = 1, alpha = 1, extra = {}) { faces.push({ kind: 'line', pts, color, width, alpha, ...extra }) }
+            function sticker(p0, p1, p2, text, options = {}) { faces.push({ kind: 'text', pts: [p0, p1, p2], text, depthBias: .9, ...options }) }
+            function quad(a, b, c, d, color, stroke, lw, alpha = 1) { face([a, b, c, d], color, stroke, lw, alpha) }
+            function box(x, y, z, w, d, h, color, opts = {}) {
+                const { top = 1, front = 1, back = 1, left = 1, right = 1, alpha = 1, stroke = 'rgba(10,23,39,.45)', lw = .7, glow = 0 } = opts;
+                const A = V(x, y, z), B = V(x + w, y, z), C = V(x + w, y + d, z), D = V(x, y + d, z);
+                const E = V(x, y, z + h), F = V(x + w, y, z + h), G = V(x + w, y + d, z + h), I = V(x, y + d, z + h);
+                if (back) face([D, C, G, I], cssHex(color, .70), stroke, lw, alpha, { glow });
+                if (left) face([A, D, I, E], cssHex(color, .79), stroke, lw, alpha, { glow });
+                if (right) face([B, C, G, F], cssHex(color, .82), stroke, lw, alpha, { glow });
+                if (front) face([A, B, F, E], cssHex(color, 1.02), stroke, lw, alpha, { glow });
+                if (top) {
+                    if (w > 6 && d > 6) { const nx = Math.ceil(w / .7), ny = Math.ceil(d / .7); for (let ix = 0; ix < nx; ix++)for (let iy = 0; iy < ny; iy++) { const xa = x + w * ix / nx, xb = x + w * (ix + 1) / nx, ya = y + d * iy / ny, yb = y + d * (iy + 1) / ny; face([V(xa, ya, z + h), V(xb, ya, z + h), V(xb, yb, z + h), V(xa, yb, z + h)], cssHex(color, 1.19), stroke, lw, alpha, { glow }) } }
+                    else face([E, F, G, I], cssHex(color, 1.19), stroke, lw, alpha, { glow });
+                }
+            }
+            function flat(x, y, z, w, d, color, alpha = 1) {
+                const nx = Math.ceil(w / 1.05), ny = Math.ceil(d / 1.05);
+                for (let i = 0; i < nx; i++)for (let j = 0; j < ny; j++) {
+                    const xa = x + w * i / nx, xb = x + w * (i + 1) / nx, ya = y + d * j / ny, yb = y + d * (j + 1) / ny;
+                    face([V(xa, ya, z), V(xb, ya, z), V(xb, yb, z), V(xa, yb, z)], color, 'none', 0, alpha, { layer: z < .32 ? -15 + z * 10 : z < .55 ? -6 : 0 })
+                }
+            }
+            function disc(x, y, z, r, color, alpha = 1, n = 16) { let v = []; for (let i = 0; i < n; i++) { let a = i * TAU / n; v.push(V(x + Math.cos(a) * r, y + Math.sin(a) * r, z)) } face(v, color, 'none', 0, alpha) }
+            function rod(a, b, color, width = 2) { line([a, b], color, width) }
+            function ring(x, y, z, r, dir, color, width = 1, alpha = 1, n = 22) { let v = []; for (let i = 0; i <= n; i++) { let a = i * TAU / n; v.push(dir === 'yz' ? V(x, y + Math.cos(a) * r, z + Math.sin(a) * r) : V(x + Math.cos(a) * r, y + Math.sin(a) * r, z)) } line(v, color, width, alpha) }
+            function panelFront(x0, x1, y, z0, z1, color, alpha = 1) { quad(V(x0, y, z0), V(x1, y, z0), V(x1, y, z1), V(x0, y, z1), color, 'none', 0, alpha) }
+            function panelSide(x, y0, y1, z0, z1, color, alpha = 1) { quad(V(x, y0, z0), V(x, y1, z0), V(x, y1, z1), V(x, y0, z1), color, 'none', 0, alpha) }
+            function lamp(x, y, z, r, color) { lights.push({ p: V(x, y, z), r, color }) }
+            function product(x, y, z, w, d, h, color, band) { box(x, y, z, w, d, h, color, { stroke: 'rgba(34,44,51,.2)', lw: .29 }); if (band) box(x + .012, y - .009, z + h * .48, w - .024, .012, h * .13, band, { top: 0, back: 0, left: 0, right: 0, stroke: 'none' }) }
+            function displayShelf(x, y, w, d, h, layers, seed) {
+                box(x, y, .41, w, d, .13, '#a9ada9');
+                for (let k = 0; k < layers; k++) {
+                    const zz = .67 + k * (h - .34) / (layers - 1);
+                    box(x, y, zz, w, d, .075, '#d2d2c9', { stroke: '#60717a' });
+                    const count = Math.floor((w - .12) / .20);
+                    for (let j = 0; j < count; j++) {
+                        const n = (j + seed + k * 3) % 8;
+                        const colors = ['#ec9b8f', '#f5d17b', '#86b9ad', '#8ba7d1', '#db90ac', '#e0c7a4', '#b5c77e', '#b5a0cb'];
+                        product(x + .08 + j * .20, y + .06, zz + .08, .145, d * .57, .19 + (n % 3) * .05, colors[n], n % 2 ? '#f6edcd' : null);
+                    }
+                }
+                for (let j = 0; j < 2; j++)box(x + (w - .065) * j, y, .41, .065, d, h, '#556b75', { stroke: 'none' });
+            }
+            function vending(x, y) {
+                box(x, y, .36, .78, .63, 2.12, '#b94864');
+                box(x + .07, y - .023, .64, .64, .036, 1.43, '#202f49', { stroke: '#e3a2ba', lw: .8 });
+                for (let r = 0; r < 4; r++) {
+                    box(x + .09, y - .033, .78 + r * .29, .60, .017, .022, '#9bbed4', { stroke: 'none' });
+                    for (let c = 0; c < 5; c++) {
+                        const co = ['#e4edf0', '#f6c5ae', '#90d2c9', '#f9d18c', '#b0bfe7'][(r * 2 + c) % 5];
+                        product(x + .12 + c * .113, y - .038, .82 + r * .29, .070, .025, .19, co, null);
+                    }
+                }
+                panelFront(x + .05, x + .72, y - .049, 2.20, 2.39, '#f8e6dc');
+                sticker(V(x + .06, y - .056, 2.37), V(x + .70, y - .056, 2.37), V(x + .06, y - .056, 2.21), 'DRINK', { color: '#d15072', size: 24, bold: true });
+                box(x + .56, y - .055, .58, .14, .05, .18, '#f1ded1');
+                lamp(x + .4, y - .13, 2.26, 1.7, '#ed7a9c');
+            }
+            function bicycle(x, y) {
+                const ya = y, yb = y + 1.27, zz = .76, rr = .42, col = '#9dd7cc';
+                for (const cy of [ya, yb]) { ring(x, cy, zz, rr, 'yz', '#19354a', 3.6); ring(x, cy, zz, rr * .9, 'yz', '#a4c6cf', .8, .8, 18); for (let i = 0; i < 10; i++) { let a = i * TAU / 10; rod(V(x, cy, zz), V(x, cy + Math.cos(a) * rr * .92, zz + Math.sin(a) * rr * .92), 'rgba(211,232,230,.6)', .65) } }
+                const crank = V(x, ya + .64, .68), seat = V(x, ya + .52, 1.22), head = V(x, yb - .24, 1.29);
+                [[V(x, ya, .76), seat], [seat, crank], [crank, V(x, ya, .76)], [seat, head], [head, crank], [head, V(x, yb, .76)]].forEach(s => rod(s[0], s[1], col, 3.0));
+                rod(V(x, ya + .36, 1.29), V(x, ya + .66, 1.29), '#e8c8ac', 3.3);
+                rod(head, V(x, yb - .18, 1.49), col, 2.5); rod(V(x, yb - .18, 1.49), V(x + .19, yb - .18, 1.49), '#1d3844', 3.3);
+                rod(crank, V(x + .12, ya + .63, .58), '#efbd9f', 2.4);
+            }
+            function pole(x, y, h, color) { box(x - .053, y - .053, .32, .106, .106, h, color, { stroke: '#263448', lw: .55 }) }
+            function build() {
+                // One contiguous square museum-like plinth; every feature lives on it.
+                box(-5, -5, -.54, 10, 10, .62, '#18243a', { stroke: '#2c455a', lw: 1.4 });
+                faces.forEach(f => f.layer = -21);
+                const edgeStart = faces.length;
+                box(-5, -5, .075, 10, 10, .10, '#4c6273', { stroke: '#99a6a7', lw: 1.1 });
+                for (let i = edgeStart; i < faces.length; i++)faces[i].layer = -20;
+                flat(-4.94, -4.94, .179, 9.88, 9.88, '#28364e');
+                // The road is an L shaped turning street wrapping the corner store.
+                flat(-4.92, -4.93, .189, 9.84, 2.28, '#25344b');
+                flat(2.32, -2.74, .19, 2.60, 7.66, '#243249');
+                // Sidewalk with fine curbstones and a distinct angled turn.
+                flat(-4.91, -2.63, .215, 7.12, 5.55, '#62727b');
+                flat(-4.90, -2.67, .239, 7.09, .17, '#9aaba9');
+                flat(2.16, -2.50, .239, .18, 7.39, '#9aaba9');
+                for (let i = 0; i < 11; i++)line([V(-4.9 + i * .65, -2.63, .248), V(-4.9 + i * .65, -2.49, .248)], '#4d646e', .55, .8);
+                for (let j = 0; j < 12; j++)line([V(2.16, -2.4 + j * .61, .249), V(2.32, -2.4 + j * .61, .249)], '#4c646d', .55, .8);
+                // Fine road geometry, crosswalk, reflective paint, puddles and gutter.
+                for (let i = 0; i < 7; i++)flat(-.22 + i * .48, -4.52, .203, .27, 1.44, i % 2 ? '#b7cad1' : '#d3dcd8', .73);
+                for (let i = 0; i < 4; i++)flat(3.42, -2.02 + i * 1.6, .206, .11, .72, '#b9bfac', .45);
+                flat(-4.84, -2.9, .204, 6.7, .038, '#677e89', .55);
+                for (let i = 0; i < 13; i++) {
+                    let xx = -4.7 + i * .51;
+                    flat(xx, -2.76, .253, .30, .13, '#2c3d51');
+                    for (let j = 0; j < 3; j++)line([V(xx + .036 + j * .085, -2.733, .259), V(xx + .036 + j * .085, -2.655, .259)], '#7c909a', .65);
+                }
+                for (let i = 0; i < 14; i++)flat(2.46, -2.3 + i * .49, .204, .13, .27, '#364759', .5);
+                for (let i = 0; i < 17; i++) {
+                    let xx = between(-4.7, 4.6), yy = between(-4.69, 4.6);
+                    if ((xx < 2.2 && yy > -2.6)) continue;
+                    disc(xx, yy, .211, between(.14, .43), i % 3 ? '#49677a' : '#59798d', .25, 11);
+                    disc(xx - .07, yy - .03, .215, between(.06, .18), '#9dabc1', .13, 11);
+                }
+                // Soft fake reflected strips, made from actual flat geometric glazes.
+                for (let i = 0; i < 9; i++)flat(-3.5 + i * .39, -3.43 - i * .055, .222, .095, .48 + i * .03, i % 2 ? '#66d6d0' : '#f4b28b', .24);
+                for (let i = 0; i < 5; i++) {
+                    flat(-3.55 + i * .67, -4.22 + i * .14, .224, .24, .035, i % 2 ? '#c5f4ea' : '#ffc49c', .28);
+                    flat(-3.3 + i * .67, -3.73 + i * .10, .225, .055, .51, i % 2 ? '#72d1cd' : '#f6a89f', .13);
+                }
+                for (let i = 0; i < 8; i++)flat(3.5 + between(-.22, .28), -2 + i * .67, .218, .08, .38, i % 2 ? '#eab996' : '#7dcfd0', .13);
+                // Store footprint and tile flooring.
+                const floorStart = faces.length;
+                box(-3.98, -2.36, .26, 5.85, 5.22, .19, '#d6d5c9');
+                for (let i = floorStart; i < faces.length; i++)faces[i].layer = -7;
+                flat(-3.87, -2.27, .455, 5.59, 4.90, '#d9dbd1');
+                for (let i = 0; i < 12; i++)line([V(-3.84 + i * .46, -2.27, .459), V(-3.84 + i * .46, 2.62, .459)], '#a6b9b7', .5, .50);
+                for (let j = 0; j < 11; j++)line([V(-3.86, -2.24 + j * .45, .459), V(1.72, -2.24 + j * .45, .459)], '#a6b9b7', .5, .50);
+                // Back and left walls, colorful inside shop band and posters.
+                box(-3.98, 2.47, .45, 5.85, .20, 2.85, '#e6e5d8');
+                box(-3.98, -2.33, .45, .18, 5.0, 2.85, '#d4d8d2');
+                box(1.69, .68, .45, .20, 1.99, 2.85, '#d3ded8');
+                panelFront(-3.75, 1.55, 2.452, 2.66, 2.91, '#86c5c1', .9);
+                sticker(V(-3.59, 2.430, 2.89), V(1.25, 2.430, 2.89), V(-3.59, 2.430, 2.67), 'おべんとう  •  おにぎり  •  あたたかい飲みもの', { color: '#f9faf2', size: 23 });
+                // Warm backlit coolers, bento counter, a fitted magazine shelf.
+                for (let i = 0; i < 4; i++) {
+                    let x = -3.52 + i * .64;
+                    box(x, 2.11, .55, .56, .29, 1.78, '#bccfd0');
+                    panelFront(x + .055, x + .505, 2.092, .69, 2.18, '#345668', .9);
+                    for (let k = 0; k < 4; k++) {
+                        box(x + .065, 2.057, .84 + k * .32, .40, .023, .028, '#a3e0d8', { stroke: 'none' });
+                        for (let b = 0; b < 4; b++)product(x + .085 + b * .103, 2.02, .88 + k * .32, .071, .04, .19, ['#edaaa1', '#c9d57c', '#f4d4a2', '#accbe1'][(k + b + i) % 4]);
+                    }
+                    line([V(x + .07, 2.028, .75), V(x + .07, 2.028, 2.17)], '#e8f7e5', 1.1, .72);
+                }
+                box(-.65, 2.07, .55, 1.80, .37, 1.22, '#e6d8b9');
+                for (let i = 0; i < 4; i++)for (let j = 0; j < 2; j++) {
+                    product(-.51 + i * .39, 1.998, .84 + j * .43, .29, .10, .19, ['#c4a581', '#e7b2a5', '#bfd4a4', '#d0b5dd'][(i + j) % 4]);
+                }
+                box(-3.68, -1.34, .46, .36, 1.31, 1.33, '#dfd8bd');
+                for (let i = 0; i < 5; i++) {
+                    box(-3.69, -1.30 + i * .245, .78, .035, .20, .34, ['#d58c83', '#e4c88e', '#9abdae'][i % 3]);
+                }
+                // Two fully stocked low aisles, deliberately spaced so interior remains visible.
+                displayShelf(-2.85, -1.13, 1.47, .64, 1.58, 3, 1);
+                displayShelf(-2.82, .11, 1.47, .66, 1.59, 3, 4);
+                displayShelf(-.93, -.64, 1.14, .56, 1.36, 3, 6);
+                // Suspended fluorescent fixtures and a visible endcap add gentle warm density.
+                for (let i = 0; i < 3; i++) {
+                    box(-3.19 + i * 1.57, .78, 2.76, 1.06, .24, .07, '#fff3d2', { stroke: '#d7d8c7', lw: .5 });
+                    lamp(-2.64 + i * 1.57, .90, 2.69, 1.45, '#ffe5a7');
+                }
+                box(-.90, 1.15, .47, .61, .56, 1.46, '#b4c6c2');
+                for (let j = 0; j < 4; j++) {
+                    box(-.94, 1.11, .80 + j * .31, .70, .63, .045, '#e2caa7');
+                    for (let k = 0; k < 3; k++)product(-.87 + k * .19, 1.09, .86 + j * .31, .13, .15, .19, ['#e9b0a5', '#b5c6dd', '#ded08d'][(j + k) % 3]);
+                }
+                // Checkout counter, register, coffee brewer and oden warmer.
+                box(.41, .45, .47, 1.13, .62, .82, '#b5c9c7');
+                box(.42, .43, 1.26, 1.12, .68, .085, '#f1dfc4');
+                box(1.10, .68, 1.35, .25, .20, .19, '#293d53');
+                box(1.13, .60, 1.49, .18, .05, .19, '#81cfd0');
+                box(.55, .57, 1.36, .25, .23, .43, '#424c57');
+                panelFront(.59, .75, .555, 1.53, 1.72, '#a3dbce');
+                box(.82, .58, 1.35, .21, .22, .19, '#e6b98a');
+                for (let i = 0; i < 3; i++)disc(.87 + i * .058, .59, 1.557, .022, '#9a7565');
+                box(.50, 1.22, .48, .94, .45, .86, '#ced4c9');
+                box(.55, 1.19, 1.31, .82, .40, .12, '#f4ca89');
+                for (let i = 0; i < 5; i++)box(.60 + i * .13, 1.13, 1.41, .09, .09, .08, '#c29268');
+                // Interior markings and entrance mat.
+                flat(.92, -2.17, .468, .65, 1.02, '#8cb8b6', .57);
+                flat(.77, -2.72, .275, .86, .41, '#2a5a62');
+                for (let i = 0; i < 6; i++)line([V(.83 + i * .125, -2.68, .281), V(.83 + i * .125, -2.38, .281)], '#84aaa9', .75);
+                // Facade pillars and glass mullions.
+                for (let x of [-3.94, -2.12, -.26, .78, 1.76]) box(x, -2.45, .43, .09, .15, 2.24, '#e2ede9');
+                box(-3.94, -2.47, 2.57, 5.78, .20, .15, '#bad0cd');
+                box(-3.94, -2.47, .43, 5.78, .17, .11, '#93afaf');
+                // Clear windows: very low opacity, carefully outlined and reflected.
+                for (let [a, b] of [[-3.83, -2.15], [-2.03, -.30], [-.19, .71]]) {
+                    panelFront(a, b, -2.473, .55, 2.55, '#a7e8fa', .079);
+                    line([V(a, -2.477, .54), V(a, -2.477, 2.55), V(b, -2.477, 2.55), V(b, -2.477, .54)], '#b4e7e4', 1.05, .62);
+                    line([V(a + .10, -2.481, 2.37), V(a + .37, -2.481, 1.42)], '#e5f6f8', .85, .21);
+                }
+                // Glass right-side panel framed near the entrance.
+                panelSide(1.884, -2.27, .57, .62, 2.48, '#a9e6eb', .12);
+                line([V(1.888, -2.25, .57), V(1.888, -2.25, 2.48), V(1.888, .56, 2.48)], '#aedbd8', 1.2);
+                // Store ribbon signage, polished canopy / overhanging eave.
+                box(-4.02, -2.58, 2.64, 5.97, .36, .65, '#20576a', { glow: 1 });
+                panelFront(-3.90, 1.81, -2.598, 2.76, 3.15, '#1d5d70');
+                box(-4.01, -2.64, 3.17, 5.97, .45, .105, '#75c7b5', { glow: 1 });
+                box(-4.03, -2.65, 2.65, 5.99, .47, .055, '#e9aa84', { glow: 1 });
+                sticker(V(-3.74, -2.626, 3.135), V(1.37, -2.626, 3.135), V(-3.74, -2.626, 2.80), '月灯り  MART  ·  24H', { color: '#f2f8ee', size: 31, bold: true, tracking: 1 });
+                // Partial removable 'dollhouse' roof: solid perimeter, open upper well for inspection.
+                box(-4.07, 2.09, 3.30, 6.02, .73, .24, '#364e60');
+                box(-4.07, -2.58, 3.33, .34, 5.26, .17, '#455a67');
+                box(1.65, .67, 3.33, .32, 2.11, .17, '#455a67');
+                box(-4.08, -2.59, 3.33, 6.04, .60, .16, '#526b76');
+                for (let i = 0; i < 5; i++)box(-3.4 + i * 1.06, 2.16, 3.55, .26, .28, .15, '#77888d');
+                // Side wall awning and a vertical side hanging sign.
+                box(1.83, .71, 2.63, .39, 1.70, .17, '#426d79');
+                box(1.96, -1.18, 2.15, .17, .77, .87, '#e5e3d1');
+                panelSide(2.14, -1.13, -.47, 2.29, 2.85, '#467f8c');
+                sticker(V(2.152, -.49, 2.83), V(2.152, -1.10, 2.83), V(2.152, -.49, 2.35), '24H', { color: '#fff1c7', size: 27, bold: true });
+                // Exterior objects on the same base.
+                vending(-3.57, -3.23);
+                // Two trash bins (at the entrance) + umbrella rack.
+                for (let i = 0; i < 2; i++) {
+                    box(-1.92 + i * .39, -2.88, .27, .29, .32, .66, i ? '#638d96' : '#708f88');
+                    box(-1.94 + i * .39, -2.90, .87, .33, .36, .08, '#bfc6b7');
+                    flat(-1.88 + i * .39, -2.87, .955, .19, .12, '#233b45');
+                }
+                box(-.93, -2.81, .28, .37, .29, .27, '#516b7d');
+                for (let i = 0; i < 4; i++) {
+                    const x = -.87 + i * .085;
+                    rod(V(x, -2.7, .46), V(x + .045, -2.69, 1.35), ['#99c6cb', '#d6b4c6', '#9ebbb0', '#c8a68a'][i], 2.0);
+                    rod(V(x + .045, -2.69, 1.35), V(x + .12, -2.69, 1.31), '#d6dfdd', 1.6);
+                }
+                // Tiny posters / community noticeboard.
+                box(1.86, 1.20, 1.0, .13, .94, 1.21, '#475d6a');
+                panelSide(2.006, 1.29, 2.04, 1.12, 2.10, '#efddc6');
+                sticker(V(2.016, 1.99, 2.03), V(2.016, 1.33, 2.03), V(2.016, 1.99, 1.31), '秋の新商品', { color: '#6f5966', size: 23, bold: true });
+                for (let i = 0; i < 3; i++)line([V(2.018, 1.39, 1.28 + i * .085), V(2.018, 1.95, 1.28 + i * .085)], '#a3a39b', 1);
+                // AC condenser near the alley.
+                box(1.90, 2.12, 1.03, .52, .59, .66, '#b4c7c9');
+                for (let k = 0; k < 5; k++)line([V(2.438, 2.18, 1.15 + k * .09), V(2.438, 2.61, 1.15 + k * .09)], '#607b87', 1.7);
+                // Dim side alley at the right edge of the block.
+                flat(2.53, 2.91, .22, 2.24, 1.84, '#303e51');
+                for (let j = 0; j < 6; j++)flat(2.62, 3.13 + j * .255, .225, 1.93, .025, '#697888', .12);
+                box(2.39, 3.12, .27, .31, 1.56, .69, '#394b5d');
+                for (let j = 0; j < 3; j++)box(2.37, 3.28 + j * .42, .97, .34, .07, .095, '#8b9a94');
+                // Bike and parking stand. The bike is genuine projected 3D geometry.
+                bicycle(2.08, -1.70);
+                rod(V(2.23, -1.78, .31), V(2.23, -1.78, 1.17), '#a9babb', 3);
+                box(2.52, -.25, .23, .32, .47, .08, '#b4bdb8');
+                sticker(V(2.57, -.30, .315), V(2.81, -.30, .315), V(2.57, .14, .315), 'P', { color: '#78b2c5', size: 28, bold: true });
+                // Corner guardrails.
+                for (let y of [-1.25, .25, 1.75]) {
+                    pole(2.55, y, .93, '#b7c7c7');
+                }
+                for (let z of [.73, 1.14]) line([V(2.55, -1.25, z), V(2.55, .25, z), V(2.55, 1.75, z)], '#d1ddda', 3.6);
+                // Roadside streetlamp, insulator and overhead electric wires.
+                pole(4.17, -2.12, 4.72, '#637989');
+                rod(V(4.17, -2.12, 5.0), V(3.43, -2.12, 5.04), '#8fa2a9', 5);
+                box(3.18, -2.26, 4.89, .39, .29, .16, '#d9ddc6', { glow: 1 });
+                lamp(3.34, -2.11, 4.84, 2.8, '#ffe5a7');
+                lamp(3.48, -2.04, .25, 2.7, '#c5ae72');
+                pole(3.64, 2.74, 5.33, '#52687b');
+                line([V(3.12, 2.74, 4.55), V(4.13, 2.74, 4.55)], '#81949b', 3);
+                line([V(3.12, 2.74, 5.12), V(4.13, 2.74, 5.12)], '#81949b', 3);
+                for (let k = 0; k < 3; k++) {
+                    let za = 4.82 + k * .27;
+                    line([V(3.65, 2.74, za), V(1.45, 2.74, za - .47), V(-1.56, 2.61, za - .74)], '#45576e', 1.35, .80);
+                    line([V(3.65, 2.74, za), V(4.18, -2.1, za - .42)], '#43546b', 1.15, .72);
+                }
+                // Street sign on pole + tiny traffic light.
+                rod(V(3.64, 2.74, 3.52), V(2.85, 2.74, 3.52), '#a5bcc3', 2.4);
+                box(2.74, 2.67, 3.31, .86, .14, .38, '#4c8393');
+                sticker(V(2.79, 2.519, 3.63), V(3.52, 2.519, 3.63), V(2.79, 2.519, 3.39), '雨宿通り', { color: '#f5f5e7', size: 21 });
+                pole(4.58, .19, 2.60, '#718597');
+                box(4.39, .06, 2.45, .39, .27, .92, '#253347');
+                for (let k = 0; k < 3; k++) {
+                    const colors = ['#cf5265', '#efb65d', '#6cc5af'];
+                    disc(4.57, .048, 2.61 + k * .27, .065, colors[k], .65);
+                }
+                // Small planters are a soft human touch, without characters.
+                for (let p of [[-4.63, -1.83], [.16, 2.76]]) {
+                    box(p[0], p[1], .26, .51, .47, .34, '#927e77');
+                    for (let i = 0; i < 7; i++) {
+                        const xx = p[0] + .07 + i * .058, yy = p[1] + .17 + (i % 3) * .075;
+                        rod(V(xx, yy, .61), V(xx + .06, yy, .89 + (i % 3) * .08), '#5b9b85', 2.8);
+                    }
+                }
+                // Warm interiors and subtle exterior light anchors.
+                lamp(-1.2, -2.1, 2.43, 4.2, '#ffe0a2');
+                lamp(-2.3, -1.68, 1.7, 2.4, '#fee2b4');
+                lamp(.8, -2.15, 1.7, 2.3, '#ffe6b0');
+                lamp(-3.13, -3.20, 1.8, 1.55, '#f38fa9');
+                for (let i = 0; i < 160; i++) {
+                    drops.push({ x: between(-5.6, 5.6), y: between(-5.6, 5.6), z: between(.3, 8.0), speed: between(2.2, 4.6), len: between(.095, .35), alpha: between(.18, .60) });
+                }
+                for (let i = 0; i < 20; i++)ripples.push({ x: between(-4.75, 4.8), y: between(-4.78, 4.7), phase: between(0, 1), speed: between(.28, .6) });
+            }
+            build();
+            // Orthographic camera: intentional collectible isometric/anime illustration look.
+            function project(p) {
+                const cy = Math.cos(cam.yaw), sy = Math.sin(cam.yaw), cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
+                const x = p[0] - cam.panX, y = p[1] - cam.panY, z = p[2] - 1.75;
+                const scale = MIN(W / 16.4, H / 12.0) * cam.zoom;
+                return {
+                    x: W * .5 + (x * cy + y * sy) * scale, y: H * .53 + (x * sy * sp - y * cy * sp - z * cp) * scale,
+                    depth: (x * sy - y * cy) * cp + z * sp
+                };
+            }
+            function cameraScale() { return MIN(W / 16.4, H / 12.0) * cam.zoom }
+            function resize() {
+                W = MAX(1, innerWidth); H = MAX(1, innerHeight); dpr = MIN(devicePixelRatio || 1, 2);
+                canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+                canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+                ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            }
+            function poly2D(pts) { ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y); for (let j = 1; j < pts.length; j++)ctx.lineTo(pts[j].x, pts[j].y); ctx.closePath() }
+            function drawObject(obj, projected) {
+                ctx.save(); ctx.globalAlpha = obj.alpha ?? 1;
+                if (obj.kind === 'poly') {
+                    poly2D(projected); ctx.fillStyle = obj.color; ctx.fill();
+                    if (obj.stroke && obj.stroke !== 'none') { ctx.strokeStyle = obj.stroke; ctx.lineWidth = obj.lw || .7; ctx.lineJoin = 'round'; ctx.stroke() }
+                } else if (obj.kind === 'line') {
+                    ctx.beginPath(); ctx.moveTo(projected[0].x, projected[0].y);
+                    for (let i = 1; i < projected.length; i++)ctx.lineTo(projected[i].x, projected[i].y);
+                    ctx.strokeStyle = obj.color; ctx.lineWidth = obj.width; ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.stroke();
+                } else if (obj.kind === 'text') {
+                    const [a, b, c] = projected;
+                    const ww = 400, hh = 80;
+                    ctx.transform((b.x - a.x) / ww, (b.y - a.y) / ww, (c.x - a.x) / hh, (c.y - a.y) / hh, a.x, a.y);
+                    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = obj.color || '#fff';
+                    ctx.font = `${obj.bold ? '700' : '600'} ${obj.size || 28}px system-ui,'Hiragino Sans','Yu Gothic',sans-serif`;
+                    ctx.shadowColor = obj.color || '#fff'; ctx.shadowBlur = obj.bold ? 7 : 1;
+                    ctx.fillText(obj.text, ww / 2, hh / 2, 380);
+                }
+                ctx.restore();
+            }
+            function drawSky() {
+                let gr = ctx.createLinearGradient(0, 0, 0, H); gr.addColorStop(0, '#101427'); gr.addColorStop(.50, '#1c2a42'); gr.addColorStop(1, '#334458');
+                ctx.fillStyle = gr; ctx.fillRect(0, 0, W, H);
+                const x = W * .48, y = H * .68, r = MIN(W, H) * .87;
+                let glow = ctx.createRadialGradient(x, y, 1, x, y, r);
+                glow.addColorStop(0, 'rgba(97,113,145,.20)'); glow.addColorStop(.54, 'rgba(70,98,140,.075)'); glow.addColorStop(1, 'rgba(0,0,0,0)');
+                ctx.fillStyle = glow; ctx.fillRect(0, 0, W, H);
+                // Soft cast shadow visually detaches the whole complete plinth.
+                ctx.save(); ctx.translate(W * .5, H * .72); ctx.scale(1, .34);
+                let sh = ctx.createRadialGradient(0, 0, 10, 0, 0, MIN(W, H) * .57);
+                sh.addColorStop(0, 'rgba(0,4,15,.59)'); sh.addColorStop(1, 'rgba(0,4,15,0)'); ctx.fillStyle = sh;
+                ctx.beginPath(); ctx.arc(0, 0, MIN(W, H) * .57, 0, TAU); ctx.fill(); ctx.restore();
+            }
+            function drawGlow(p, r, color, opacity = .34) {
+                let s = project(p), rad = r * cameraScale();
+                const a = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, MAX(5, rad));
+                const rgb = color === '#ffe5a7' ? '255,221,153' : color === '#f38fa9' ? '255,121,154' : color === '#c5ae72' ? '244,213,138' : '255,223,170';
+                a.addColorStop(0, `rgba(${rgb},${opacity})`); a.addColorStop(.26, `rgba(${rgb},${opacity * .34})`); a.addColorStop(1, `rgba(${rgb},0)`);
+                ctx.fillStyle = a; ctx.fillRect(s.x - rad, s.y - rad, rad * 2, rad * 2);
+            }
+            function animatedDoor(time) {
+                const pulse = reduced.matches ? 0 : MAX(0, Math.sin((time % 11) / 11 * TAU - 1.0)) ** 7;
+                const amount = pulse * .31, yy = -2.505;
+                // Sliding door has two panes; open gap appears periodically.
+                for (const [a, b] of [[.85, .85 + .36 - amount / 2], [1.18 + amount / 2, 1.56]]) {
+                    if (b <= a) continue;
+                    const pts = [V(a, yy, .51), V(b, yy, .51), V(b, yy, 2.55), V(a, yy, 2.55)].map(project);
+                    ctx.save(); poly2D(pts); ctx.fillStyle = 'rgba(148,216,224,.075)'; ctx.fill(); ctx.strokeStyle = 'rgba(165,230,231,.68)'; ctx.lineWidth = 1.5; ctx.stroke(); ctx.restore();
+                    let cx = (a + b) / 2; let p0 = project(V(cx, yy - .015, 1.19)), p1 = project(V(cx, yy - .015, 1.49));
+                    ctx.strokeStyle = '#d4eae3'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y); ctx.stroke();
+                }
+            }
+            function drawPuddles(time) {
+                for (const q of ripples) {
+                    if (q.x < 2.37 && q.y > -2.68) continue;
+                    const tt = reduced.matches ? q.phase : (q.phase + time * q.speed) % 1;
+                    const radius = .03 + tt * .42, alpha = (1 - tt) * .34;
+                    let arr = []; for (let j = 0; j <= 23; j++) { let a = j * TAU / 23; arr.push(project(V(q.x + Math.cos(a) * radius, q.y + Math.sin(a) * radius, .223))) }
+                    ctx.beginPath(); ctx.moveTo(arr[0].x, arr[0].y); for (let j = 1; j < arr.length; j++)ctx.lineTo(arr[j].x, arr[j].y);
+                    ctx.strokeStyle = `rgba(179,225,236,${alpha})`; ctx.lineWidth = .8; ctx.stroke();
+                }
+            }
+            function drawRain(time) {
+                ctx.save(); ctx.lineCap = 'round';
+                const rate = reduced.matches ? 0 : time;
+                for (const d of drops) {
+                    let z = (d.z - rate * d.speed - .18); z = .25 + ((z - .25) % 7.8 + 7.8) % 7.8;
+                    let a = project(V(d.x, d.y, z)); let b = project(V(d.x - .025, d.y + .025, z - d.len));
+                    if (a.x < -30 || a.x > W + 30 || a.y < -50 || a.y > H + 50) continue;
+                    ctx.strokeStyle = `rgba(185,219,238,${d.alpha * (z > 4 ? .65 : 1)})`;
+                    ctx.lineWidth = z > 4 ? .65 : .85; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+                }
+                // Rainwater trickles down the shopfront glass; local to facade.
+                for (let i = 0; i < 23; i++) {
+                    const x = -3.75 + (i * 1.618 % 5.25), z = .65 + ((i * .497 - rate * .29) % 1.75 + 1.75) % 1.75;
+                    if (x > .77 && x < 1.6) continue;
+                    const a = project(V(x, -2.494, z)), b = project(V(x + .012, -2.495, z - .11 - .06 * (i % 3)));
+                    ctx.strokeStyle = 'rgba(221,249,251,.23)'; ctx.lineWidth = .85; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+                }
+                // Thin drops hanging off the eaves.
+                for (let i = 0; i < 18; i++) {
+                    const xx = -3.89 + i * .326, dr = (i * .467 - rate * .75) % 1;
+                    const z = 2.65 - ((dr + 1) % 1) * .31;
+                    const a = project(V(xx, -2.70, z)), b = project(V(xx, -2.70, z - .11));
+                    ctx.strokeStyle = 'rgba(198,234,245,.33)'; ctx.lineWidth = .95;
+                    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+                }
+                ctx.restore();
+            }
+            function drawDynamicLights(time) {
+                for (const l of lights) { drawGlow(l.p, l.r, l.color, l.r > 3 ? .16 : .23) }
+                // Shop sign breathes slightly, never harsh strobe.
+                const s = project(V(-.8, -2.71, 3.02));
+                drawGlow(V(-.8, -2.71, 3.02), 2.10, '#ffe5a7', .050 + (reduced.matches ? 0 : (1 + Math.sin(time * 3.9)) * .016));
+                // The tiny distant traffic signal changes gently.
+                const colors = ['#85ebc0', '#f1b772', '#d46f7d'];
+                const k = reduced.matches ? 0 : Math.floor(time / 6) % 3;
+                const ss = project(V(4.57, .015, 2.61 + (2 - k) * .27));
+                const r = 6 * cameraScale() / 35 + 2;
+                const g = ctx.createRadialGradient(ss.x, ss.y, 0, ss.x, ss.y, r * 4);
+                g.addColorStop(0, colors[k]); g.addColorStop(1, 'rgba(140,205,188,0)');
+                ctx.fillStyle = g; ctx.beginPath(); ctx.arc(ss.x, ss.y, r * 4, 0, TAU); ctx.fill();
+            }
+            function paint(now) {
+                const dt = previous ? MIN((now - previous) / 1000, .05) : 0; previous = now;
+                if (!reduced.matches) t += dt;
+                frame++; ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, H);
+                drawSky();
+                const ordered = faces.map(f => {
+                    const pts = f.pts.map(project); let depth = 0; for (const p of pts) depth += p.depth;
+                    return { f, pts, depth: depth / pts.length + (f.depthBias || 0) };
+                });
+                ordered.sort((a, b) => (a.f.layer ?? 0) - (b.f.layer ?? 0) || a.depth - b.depth);
+                for (const o of ordered) drawObject(o.f, o.pts);
+                animatedDoor(t);
+                drawPuddles(t);
+                drawDynamicLights(t);
+                drawRain(t);
+                // A very delicate cinematic vignette; no buttons, legends, or HUD.
+                const vig = ctx.createRadialGradient(W * .5, H * .44, MIN(W, H) * .1, W * .5, H * .50, MAX(W, H) * .79);
+                vig.addColorStop(0, 'rgba(5,8,21,0)'); vig.addColorStop(1, 'rgba(3,7,19,.40)');
+                ctx.fillStyle = vig; ctx.fillRect(0, 0, W, H);
+                requestAnimationFrame(paint);
+            }
+            // Mouse + touch: one finger orbit, two fingers pinch and translate; right/Shift drag pan.
+            const active = new Map(); let lastCenter = null, lastDist = 0, dragMode = 'rotate';
+            canvas.addEventListener('contextmenu', e => e.preventDefault());
+            function pointerCenter() { const a = [...active.values()]; let x = 0, y = 0; for (const p of a) { x += p.x; y += p.y } return { x: x / a.length, y: y / a.length } }
+            function pointerSpan() { const a = [...active.values()]; return a.length >= 2 ? Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y) : 0 }
+            canvas.addEventListener('pointerdown', e => {
+                e.preventDefault(); canvas.focus({ preventScroll: true });
+                canvas.setPointerCapture(e.pointerId); active.set(e.pointerId, { x: e.clientX, y: e.clientY });
+                dragMode = e.button === 2 || e.shiftKey ? 'pan' : 'rotate'; lastCenter = pointerCenter(); lastDist = pointerSpan();
+            });
+            canvas.addEventListener('pointermove', e => {
+                if (!active.has(e.pointerId)) return;
+                active.set(e.pointerId, { x: e.clientX, y: e.clientY });
+                const p = pointerCenter(), span = pointerSpan(), dx = p.x - lastCenter.x, dy = p.y - lastCenter.y;
+                if (active.size >= 2 || dragMode === 'pan') {
+                    const s = cameraScale() || 1, cs = Math.cos(cam.yaw), sn = Math.sin(cam.yaw);
+                    cam.panX -= dx * cs / s - dy * sn / (s * MAX(.35, Math.sin(cam.pitch))) * .35;
+                    cam.panY -= dx * sn / s + dy * cs / (s * MAX(.35, Math.sin(cam.pitch))) * .35;
+                    cam.panX = clamp(cam.panX, -3.8, 3.8); cam.panY = clamp(cam.panY, -3.8, 3.8);
+                    if (active.size >= 2 && lastDist > 10) cam.zoom = clamp(cam.zoom * span / lastDist, .48, 2.95);
+                } else {
+                    cam.yaw += dx * .008; cam.pitch = clamp(cam.pitch + dy * .006, .18, 1.28);
+                }
+                lastCenter = p; lastDist = span;
+            });
+            function pointerUp(e) { active.delete(e.pointerId); if (active.size) { lastCenter = pointerCenter(); lastDist = pointerSpan() } else { lastCenter = null; lastDist = 0 } }
+            canvas.addEventListener('pointerup', pointerUp); canvas.addEventListener('pointercancel', pointerUp);
+            canvas.addEventListener('wheel', e => { e.preventDefault(); cam.zoom = clamp(cam.zoom * Math.exp(-e.deltaY * .00125), .48, 2.95) }, { passive: false });
+            window.addEventListener('keydown', e => {
+                let used = true;
+                switch (e.key) {
+                    case 'ArrowLeft': cam.yaw -= .11; break; case 'ArrowRight': cam.yaw += .11; break;
+                    case 'ArrowUp': cam.pitch = clamp(cam.pitch - .085, .18, 1.28); break;
+                    case 'ArrowDown': cam.pitch = clamp(cam.pitch + .085, .18, 1.28); break;
+                    case '+': case '=': cam.zoom = clamp(cam.zoom * 1.12, .48, 2.95); break;
+                    case '-': case '_': cam.zoom = clamp(cam.zoom / 1.12, .48, 2.95); break;
+                    case 'a': case 'A': cam.panX -= .22; break; case 'd': case 'D': cam.panX += .22; break;
+                    case 'w': case 'W': cam.panY += .22; break; case 's': case 'S': cam.panY -= .22; break;
+                    case 'Home': Object.assign(cam, home); break;
+                    default: used = false;
+                }
+                if (used) e.preventDefault();
+            });
+            window.addEventListener('resize', resize, { passive: true });
+            resize(); requestAnimationFrame(paint);
+        })();
+    </script>
+</body>
+
+</html>

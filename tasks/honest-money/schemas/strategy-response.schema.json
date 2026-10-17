@@ -1,0 +1,22 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "title":"AI Canvas strategy response v1",
+  "type":"object",
+  "required":["orders"],
+  "properties":{
+    "orders":{
+      "type":"array","maxItems":50,
+      "items":{
+        "type":"object","required":["symbol","side","quantity"],
+        "properties":{
+          "symbol":{"type":"string","pattern":"^[0-9]{6}\\.(SH|SZ)$"},
+          "side":{"enum":["buy","sell"]},
+          "quantity":{"type":"integer","minimum":100,"maximum":1000000000,"multipleOf":100},
+          "reason":{"type":"string","maxLength":1000}
+        }
+      }
+    },
+    "memory":{"type":"object","description":"Serialized JSON is limited to 64 KB by the runner"},
+    "commentary":{"type":"string","description":"Only the first 4000 characters are retained"}
+  }
+}
