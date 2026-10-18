@@ -1,9 +1,5 @@
 {
-  "schema_version":1,
-  "task":"rainy-store",
-  "model":"gpt",
-  "model_version":"填写确切模型版本",
   "revisions":[
-    {"id":"v1","effective_from":"2026-10-19","directory":"revisions/v1","note":"初次提交","prompt_sha256":"替换为 tasks/rainy-store/prompt.md 的 SHA256"}
+    {"id":"v1","directory":"revisions/v1","note":"初次提交"}
   ]
 }

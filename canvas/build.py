@@ -28,7 +28,7 @@ def build():
         item = {**manifest,"revisions":[]}
         for revision in manifest["revisions"]:
             source = inside(base,revision["directory"])
-            destination = target/"artifacts"/task["id"]/manifest["model"]/revision["id"]
+            destination = inside(target/"artifacts"/task["id"]/manifest["model"], revision["id"])
             shutil.copytree(source,destination,ignore=shutil.ignore_patterns("__pycache__","*.pyc"))
             item["revisions"].append({**revision,"source":inside(source,task["submission_entry"]).read_text(encoding="utf-8"),"readme":(source/"README.md").read_text(encoding="utf-8")})
         pattern = task.get("result_pattern")

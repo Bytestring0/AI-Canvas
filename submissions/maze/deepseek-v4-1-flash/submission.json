@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "task": "maze",
+  "model": "deepseek-4-1-flash",
+  "model_version": "deepseek-4-1-flash",
+  "revisions": [
+    {
+      "id": "v1",
+      "effective_from": "2026-10-18T00:00:00+08:00",
+      "directory": "revisions/v1",
+      "note": "首次提交走迷宫与追逐策略",
+      "prompt_sha256": "75e8d858c589a3fbea1d520834ae5f090bfceb9cb66d37a0f3c56ff8f92d2deb"
+    },
+    {
+      "id": "v2",
+      "effective_from": "2026-10-18T21:45:00+08:00",
+      "directory": "revisions/v2",
+      "note": "修复追逐者全程 wait：A* 返回第一步而非误读父指针哨兵；移动合法性只按墙判定；增加贪心/任意非墙邻格三层兜底。strategy.js 未改动。",
+      "prompt_sha256": "75e8d858c589a3fbea1d520834ae5f090bfceb9cb66d37a0f3c56ff8f92d2deb"
+    }
+  ]
+}

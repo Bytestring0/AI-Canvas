@@ -786,7 +786,7 @@ function buildInterior(){
     addBox(x,2.68,-3.8,1.8,0.05,0.3,'#fff2d0',{emissive:true,glow:0.5,glowColor:'#fff2d0',glowRGB:[255,242,208],noOutline:true});
   }
   /* west wall poster */
-  addFace([[-4.16,1.2,-5.6],[-4.16,1.2,-5.2],[-4.16,1.7,-5.2],[-4.16,1.7,-5.6]],'#fff',{content:posterContent('#a29bfe','#fff','祭'),noOutline:true});
+  addFace([[-4.13,1.2,-5.2],[-4.13,1.2,-5.6],[-4.13,1.7,-5.6],[-4.13,1.7,-5.2]],'#fff',{content:posterContent('#a29bfe','#fff','祭'),noOutline:true});
 }
 
 /* ================= street furniture ================= */
@@ -883,8 +883,9 @@ function addTrashBin(x,z,ry){
   const faces=[];
   faces.push(...addCylY(0,0,0.22,0,0.5,'#3d6b4f',{noOutline:true},10));
   faces.push(...addCylY(0,0,0.24,0.5,0.56,'#2f5440',{noOutline:true},10));
-  faces.push(...addBox(0,0.3,0.23,0.3,0.14,0.02,'#e8ecf4',{noOutline:true,content:function(ctx){
-    ctx.fillStyle='#3d6b4f';ctx.font='bold 10px "Microsoft YaHei",Arial';ctx.textAlign='center';ctx.fillText('ごみ',50,55);
+  faces.push(...addBox(0,0.3,0.23,0.3,0.14,0.02,'#e8ecf4',{noOutline:true,content:function(ctx,f,t,info){
+    const W=info.w;
+    ctx.fillStyle='#3d6b4f';ctx.font='bold 30px "Microsoft YaHei",Arial';ctx.textAlign='center';ctx.fillText('ごみ',W/2,55);
   }}));
   transformFaces(faces,x,0,z,ry,0);
 }
@@ -972,11 +973,12 @@ function addGuardrail(x0,z0,x1,z1){
 function addStreetSign(x,z,ry){
   const faces=[];
   faces.push(...addCylY(0,0,0.04,0,2.2,'#3a4050',{noOutline:true},6));
-  faces.push(...addBox(0,1.9,0.02,0.5,0.35,0.04,'#2a6db0',{noOutline:true,content:function(ctx){
-    ctx.fillStyle='#2a6db0';ctx.fillRect(0,0,100,100);
-    ctx.fillStyle='#fff';ctx.font='bold 10px "Microsoft YaHei",Arial';ctx.textAlign='center';
-    ctx.fillText('中央町',50,42);
-    ctx.fillText('3-4',50,66);
+  faces.push(...addBox(0,1.9,0.02,0.5,0.35,0.04,'#2a6db0',{noOutline:true,content:function(ctx,f,t,info){
+    const W=info.w;
+    ctx.fillStyle='#2a6db0';ctx.fillRect(0,0,W,100);
+    ctx.fillStyle='#fff';ctx.font='bold 26px "Microsoft YaHei",Arial';ctx.textAlign='center';
+    ctx.fillText('中央町',W/2,42);
+    ctx.fillText('3-4',W/2,66);
   }}));
   transformFaces(faces,x,0,z,ry,0);
 }
@@ -1239,10 +1241,10 @@ function render(t){
   const dt=Math.min(0.05,(t-lastT)/1000||0.016);
   lastT=t;
   time=t/1000;
-  updateDynamics(time);
   updateDoor(time);
   updateTraffic(time);
   updateRain(time,dt);
+  updateDynamics(time);
   updateSpills();
   setLamp(tl.red,tl.active==='r','#ff5a5a');
   setLamp(tl.yellow,tl.active==='y','#ffd166');

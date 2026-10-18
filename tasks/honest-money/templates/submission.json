@@ -1,8 +1,4 @@
 {
-  "schema_version":1,
-  "task":"honest-money",
-  "model":"gpt",
-  "model_version":"填写确切模型版本",
   "revisions":[
     {"id":"v1","effective_from":"2026-10-19","directory":"revisions/v1","note":"初次提交；由参赛 AI 填写策略摘要"}
   ]

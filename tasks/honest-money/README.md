@@ -257,7 +257,7 @@ stdout 只能有一个合法 JSON 对象，使用以下三个字段：
 
 1. 按项目 README 启用 Pages 的 GitHub Actions 部署。
 2. 本任务使用无需注册、无需 token 的腾讯公开行情，**不用购买 Tushare、配置密钥或安装行情 SDK**。
-3. 注册模型，把外部 AI 生成的策略放到 submissions/honest-money/<model-id>/。没有提交时不采集行情。
+3. 把外部 AI 生成的策略放到 submissions/honest-money/<模型名>/，目录名自动作为模型名，无需注册。没有提交时不采集行情。
 4. 通用工作流每10分钟轮询，本任务只在工作日北京时间09:30–11:35、13:00–15:05尝试采集，结束后5分钟用于容忍最后一轮的调度延迟。
 5. capture 获取公开实时最新价 → 无密钥、无网络容器执行策略 → 保存本任务 data/ → 部署静态 Pages。Python 和 Docker 均由 GitHub runner 提供。
 
@@ -277,7 +277,7 @@ stdout 只能有一个合法 JSON 对象，使用以下三个字段：
 
 ## 版本和复盘
 
-从本目录 templates/ 复制提交结构到根目录通用 submissions/honest-money/<model>/。填写具体 model_version，交付策略和 README。占位模板没有交易逻辑，不是参赛作品。
+将 strategy.py 和 README.md 直接放到 submissions/honest-money/<模型名>/ 即可自动发现，无需注册或清单。需要指定版本生效时间时，可选填本目录 templates/ 中的 submission.json。占位模板没有交易逻辑，不是参赛作品。
 
 更新策略应保留旧目录、追加 v2。effective_from 可以使用带时区的时间戳，例如 `2026-10-19T10:20:00+08:00`，必须晚于最后已结算的实际时间；也支持日期（北京时间零点）。新版本沿用本金、债务、持仓与 memory。旧委托仍按旧版本归属记录；新版本再生成下一轮信号。已执行代码、元数据和行情快照以 SHA256 冻结。
 
@@ -297,16 +297,15 @@ stdout 只能有一个合法 JSON 对象，使用以下三个字段：
 
 ## 本地命令与数据
 
-先在项目根目录执行通用测试并启动页面，方法见项目 README。要实际运行自己拿到的策略，需要先准备以下提交；只有 strategy.py 和 README.md 两个文件还不足以被框架发现：
+将 AI 交付的两个文件保存到模型目录，框架会自动识别：
 
 ```text
-submissions/honest-money/<已注册的模型ID>/
-  submission.json
-  revisions/v1/strategy.py
-  revisions/v1/README.md
+submissions/honest-money/<模型名>/
+  strategy.py
+  README.md
 ```
 
-submission.json 从本任务 templates/submission.json 复制，填写 task、与文件夹一致的 model、真实 model_version 和 revisions；effective_from 应为希望开始生效的北京时间（可用带 +08:00 的完整时间戳）。用 AI 交付的两个文件替换 v1 下的模板。模型 ID 必须已在 config/models.json 注册。模板策略只返回空单，是协议检查用例，不是正式参赛策略。
+无需 submission.json 或模型注册。默认生效时间取策略文件修改时间。已有 revisions/v1/ 结构继续兼容；账户已开始结算后，更新应保留旧版并追加 v2，可选填清单指定 effective_from（带 +08:00 的完整时间戳），以维持历史结算的版本归属。模板策略只返回空单，不是正式参赛策略。
 
 以下命令均从项目根目录运行。使用隔离环境需要安装并启动 Docker；Windows 的 Docker Desktop 应使用 Linux containers。先用 docker version 确认客户端和服务端均正常：
 
@@ -331,7 +330,7 @@ python -m canvas build
 ## GitHub 首次运行验收
 
 1. 先按项目 README 完成 Pages 部署。无需安装 Python 后端或添加腾讯行情 token；Actions 的 Ubuntu runner 提供 Python，策略使用 Docker 容器运行。
-2. 把有效策略提交推送到默认分支。只有 HTML 作品或只有模型注册信息时，本任务不会被调度。
+2. 把策略文件推送到默认分支。只有其他任务的作品时，本任务不会被调度。
 3. 在正常交易日的北京时间09:30–11:35、13:00–15:05，进入 Actions → Run scheduled task plugins → Run workflow。手动执行不会绕过时间窗，周末执行不会产生交易。
 4. 检查 plan → capture → execute → persist → publish 各阶段。capture 验证腾讯接口能从 GitHub 出口访问；execute 验证 Docker 能实际执行策略。Docker 镜像拉取失败或网络请求被拒绝会在对应阶段报错，本地测试不能保证这些外部条件。
 5. 确认仓库新增 data: update scheduled task results 提交，且本任务 data/runs/<model>.json 中最新 session.status 为 ok。策略报错会记录为 strategy_error，因此工作流绿色还不足以说明策略成功；同时检查日志中的策略事件。

@@ -27,9 +27,13 @@ schedule 格式：`{"timezone":"Asia/Shanghai","interval_minutes":10,"weekdays":
 
 同目录提供 styles.css。构建复制整个 ui/ 到 dist/task-ui/<id>/；插件可从 ../../ui.js 使用通用转义、时间格式和文件下载工具。构建不会根据任务 kind 分支。
 
+需要整体交互的任务可导出 `mountGallery(root, context)` 接管任务列表区域，context 包含 task、models、submissions、openDoc；仍由框架管理导航和清理。声明 `gallery_view: true` 可在无正式提交时加载此钩子，例如提供示例或本地导入。未声明的任务保持原有空状态和卡片行为。
+
 ## 提交与结果
 
-通用提交位于 submissions/<task>/<model>/submission.json，含 schema_version=1、task、model、确切 model_version 与 revisions。每版包含 id、effective_from、directory、note，并交付 task.submission_entry 和 README.md。专用字段由任务自己的校验器规定。effective_from 可以是 ISO 日期或带时区的时间戳，其具体生效语义由任务解释。
+通用提交通过扫描 `submissions/<task>/<模型名>/` 自动发现。task 和 model 以目录名为准，模型显示名等于目录名，颜色由名称稳定生成，无需模型注册表。将 task.submission_entry、README.md 及本任务其他文件直接放在模型目录内即可。也支持不带清单的 `revisions/v1/` 等版本目录，按自然顺序排列（v2 在 v10 前）。两种结构同时存在时，优先使用模型目录里的文件。
+
+`submission.json` 仅为可选元数据，兼容已有提交。可选 model_version、revisions；每版可指定 id、directory、effective_from、note。未填模型版本时使用目录名，未填生效时间时使用入口文件修改时间，未填说明时使用空字符串。不要求 schema_version、模型注册或 prompt_sha256。路径与文件存在检查用于提供明确的读取错误。周期任务对版本生效时间的业务语义仍由任务自己定义。
 
 如果声明 result_pattern（如 data/runs/{model}.json），构建读取每个模型的结果并挂在 submission.run。框架不解释结果结构。JSON 静态接口 dist/data/catalog.json 提供 tasks、models、submissions 与通用指南。原始业务数据不自动发布到 Pages。
 

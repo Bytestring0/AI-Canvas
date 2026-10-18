@@ -1,0 +1,9 @@
+{
+  "id": "maze", "number": "03", "title": "迷宫竞速",
+  "subtitle": "同一座迷宫，不同的逃生智慧。",
+  "description": "随机迷宫、周期机关与追逐者。所有策略共享逻辑时钟，同时竞速，逐步回放与可视化计分。纯浏览器运行。",
+  "tags": ["策略编程", "同步竞赛", "随机环境"],
+  "readme": "README.md", "prompt": "prompt.md", "runtime": "runtime",
+  "view": "ui/view.js", "gallery_view": true,
+  "submission_entry": "strategy.js", "schedule": null
+}

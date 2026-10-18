@@ -8,7 +8,7 @@
 
 每个任务的生成提示词必须可以单独复制使用，正文内完整写明任务目标、交付文件及回答格式、运行环境和资源限制、全部输入输出字段及单位、有效示例、执行规则和异常行为。固定参数直接写入正文；运行时才出现的数据要说明由环境何时、以什么结构提供，不能把生成代码所需的信息留在其他文件里。
 
-操作者使用时应完整复制任务标明的提示词正文；AI 按提示词交付产物，操作者负责保存文件、补提交元数据并上传。复盘提示词也必须连同完整协议、日志及所需旧代码一起提供。不能只说“遵守原协议”或“参照仓库实现”。修改任务协议或环境后，应同步更新提示词，避免文档与实际运行不一致。具体任务的提示词与规则仍保存在各自任务目录内。
+操作者使用时应完整复制任务标明的提示词正文；AI 按提示词交付产物，操作者只需将文件保存到 `submissions/<任务>/<模型名>/` 并上传。模型名直接读取目录名，无需注册、提交清单或提示词哈希。复盘提示词也必须连同完整协议、日志及所需旧代码一起提供。不能只说“遵守原协议”或“参照仓库实现”。修改任务协议或环境后，应同步更新提示词，避免文档与实际运行不一致。具体任务的提示词与规则仍保存在各自任务目录内。
 
 ## 部署
 
@@ -38,8 +38,7 @@ GitHub cron 可能延迟或丢失触发，框架不承诺严格实时；任务�
 ```text
 canvas/                      通用注册、构建、调度与 CLI
 web/                         主页、左侧任务导航、模型预览卡片与展开容器
-config/models.json           通用模型注册表
-schemas/submission.schema.json
+schemas/submission.schema.json 可选版本元数据格式
 submissions/<task>/<model>/  通用提交入口
 .github/workflows/           通用部署、检查、任务派发
  tasks/<task-id>/
@@ -70,7 +69,9 @@ submissions/<task>/<model>/  通用提交入口
 
 静态任务 schedule=null。周期任务声明 schedule、可选 credential_secret 和 container_image，并实现 capture/run。完整钩子契约见 [docs/architecture.md](docs/architecture.md)。任务代码属于维护者审阅的可信代码；外部模型产物的隔离方式由任务运行环境负责。
 
-模型在 config/models.json 注册。默认进入主页，从左侧选择任务。任务页只显示已有提交的小型预览卡片，点击后在整个右侧内容区展示完整结果，左侧导航保留；通过“返回列表”或浏览器后退回到卡片列表。未提交模型不占位。预览与完整展示由各任务自己的组件实现。
+模型直接从 `submissions/<task>/<模型名>/` 目录自动发现，显示名就是目录名，可以使用中文、空格和版本号；颜色自动分配。文件直接放在模型目录内即可，也兼容 `revisions/v1/`、`revisions/v2/` 等版本目录。`submission.json` 仅在需要自定义版本时间等信息时选填，旧提交继续兼容。
+
+默认进入主页，从左侧选择任务。任务页只显示已有提交的小型预览卡片，点击后在整个右侧内容区展示完整结果，左侧导航保留；通过“返回列表”或浏览器后退回到卡片列表。未提交模型不占位。预览与完整展示由各任务自己的组件实现。
 
 ## 本地使用
 
@@ -79,13 +80,11 @@ Python 3.12+，框架无第三方 Python 依赖；具体任务可能声明自己
 ```sh
 # 先进入含 canvas/ 和 tasks/ 的项目根目录
 python --version
-python -m canvas validate
-python -m unittest discover -s tests -v
 python -m canvas serve
 # 在浏览器打开 http://localhost:4173
 ```
 
-看到 `OK` 表示自动测试通过；serve 启动时构建 dist/，终端保持运行即可浏览，Ctrl+C 停止。Windows 也可以将 python 替换为 py -3.12。只预览页面不需要 Docker、Node、npm install 或后端服务。端口被占用时用 `python -m canvas serve --port 4174`。
+serve 启动时自动发现作品并构建 dist/，终端保持运行即可浏览，Ctrl+C 停止，不需要先运行验证命令。Windows 也可以将 python 替换为 py -3.12。只预览页面不需要 Docker、Node、npm install 或后端服务。端口被占用时用 `python -m canvas serve --port 4174`。
 
 开发服务器启动时构建；改动文件后在另一个终端进入同一根目录执行 `python -m canvas build` 并刷新。不带提交的任务页没有模型卡片，添加产物的目录与元数据方法见各任务 README。本地预览不会启动周期任务；需要实际执行时使用下述 task 命令，并遵守任务自己的环境要求。所有展示 URL 均相对于站点目录，兼容 GitHub Pages 的仓库子路径。
 
