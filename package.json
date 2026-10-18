@@ -1,5 +1,5 @@
 {
   "name": "ai-canvas", "version": "1.0.0", "private": true, "type": "module",
-  "scripts": {"build": "python -m canvas build", "dev": "python -m canvas serve", "test": "python -m unittest discover -s tests -v", "test:maze": "node --test tasks/maze/tests/engine.test.js tasks/maze/tests/hunters.test.js", "test:maze:browser": "node --test tasks/maze/tests/browser.test.mjs", "validate": "python -m canvas validate"},
+  "scripts": {"build": "python -m canvas build", "dev": "python -m canvas serve", "test": "python -m unittest discover -s tests -v", "test:maze": "node --test tasks/maze/tests/engine.test.js tasks/maze/tests/hunters.test.js tasks/maze/tests/competition.test.js", "test:maze:browser": "node --test tasks/maze/tests/browser.test.mjs", "validate": "python -m canvas validate"},
   "engines": {"node": ">=20"}
 }

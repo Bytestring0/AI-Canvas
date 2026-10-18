@@ -32,6 +32,39 @@ async function add(page,name,source,hunterSource){
 }
 const waitHunter='function decide(o){return {actions:o.hunters.map(h=>({id:h.id,action:"wait"}))}}';
 
+test('successful interception earns hunter points consistently in cards, ranking, replay and export',async()=>{
+  const {context,page,errors}=await open();
+  try{
+    const {EXAMPLES}=await import('../ui/examples.js');
+    await page.locator('#mz-demos').uncheck();
+    await add(page,'CHASER','function decide(){return {action:"wait"}}',EXAMPLES[0].hunterSource);
+    await add(page,'IDLE','function decide(){return {action:"wait"}}',waitHunter);
+    await page.locator('#mz-mode-hunters').click();
+    await page.locator('#mz-shared').selectOption({label:'CHASER'});
+    await page.locator('#mz-level').selectOption('scout');
+    await page.locator('#mz-speed').selectOption('16');await page.locator('#mz-start').click();
+    await page.waitForFunction(()=>document.querySelector('#mz-phase')?.textContent==='比赛结束',null,{timeout:45000});
+    const pending=page.waitForEvent('download');await page.locator('#mz-export').click();
+    await (await pending).saveAs('qa/hunter-capture-round.json');
+    const log=JSON.parse(await readFile('qa/hunter-capture-round.json','utf8'));
+    const chaser=log.entries.find(e=>e.name==='CHASER'),idle=log.entries.find(e=>e.name==='IDLE');
+    assert.equal(chaser.result.status,'dead');assert.equal(chaser.score.capture,6000);
+    assert(chaser.score.total>=7000);assert(chaser.score.total>idle.score.total);
+    assert.equal(idle.result.status,'timeout');assert.equal(idle.score.capture,4000);
+    const card=page.locator('.mz-card').filter({has:page.locator('.mz-card-head strong',{hasText:'CHASER'})});
+    assert.equal(await card.locator('[data-status]').textContent(),'拦截成功');
+    assert.equal(await card.locator('[data-score]').textContent(),chaser.score.total.toLocaleString()+' 分');
+    assert((await page.locator('.mz-ranking tbody tr').first().textContent()).includes('CHASER'));
+    assert.equal(await page.locator('.mz-total').first().textContent(),chaser.score.total.toLocaleString());
+    await card.locator('[data-focus]').click();
+    assert((await page.locator('.mz-inspect-score').textContent()).startsWith(chaser.score.total.toLocaleString()));
+    await page.locator('#mz-seek').fill(String(chaser.result.finishTick));await page.locator('#mz-seek').dispatchEvent('input');
+    assert.equal(await card.locator('[data-status]').textContent(),'拦截成功');
+    assert.equal(await card.locator('[data-score]').textContent(),chaser.score.total.toLocaleString()+' 分');
+    assert.deepEqual(errors,[]);
+  }finally{await context.close()}
+});
+
 async function selectHunterSeed(page,name){
   const seed=await page.evaluate(async name=>{
     const [{chooseHunter},{hunterCandidates},{EXAMPLES}]=await Promise.all([
@@ -156,5 +189,68 @@ test('built-in guard can be drawn in all levels, executes in worker and stays ou
       assert.equal(Object.values(pursuit.memory.roles).filter(role=>role==='key').length,2);
     }
     assert.deepEqual(errors,[]);
+  }finally{await context.close()}
+});
+
+test('hunter comparison uses one selected runner for all hunters, scores and replays from their perspective',async()=>{
+  const {context,page,errors}=await open();
+  try{
+    await page.locator('#mz-mode-hunters').click();
+    assert.equal(await page.locator('#mz-mode-hunters').getAttribute('aria-pressed'),'true');
+    await page.locator('#mz-shared').selectOption('demo-safe');await page.locator('#mz-level').selectOption('scout');
+    assert.equal(await page.locator('#mz-hunter-info').textContent(),'稳健寻路');
+    assert.equal(await page.locator('.mz-card').count(),4);
+    assert((await page.locator('.mz-card-head strong').allTextContents()).includes('我自己写的'));
+    assert((await page.locator('.mz-card-meta').allTextContents()).every(text=>text.includes('迷宫：稳健寻路')));
+    assert((await page.locator('.mz-ranking thead').textContent()).includes('追逐策略'));
+    await page.locator('#mz-speed').selectOption('16');await page.locator('#mz-start').click();
+    await page.waitForFunction(()=>document.querySelector('#mz-phase')?.textContent==='比赛结束',null,{timeout:45000});
+    const ranking=await page.locator('.mz-ranking tbody').textContent();
+    const pending=page.waitForEvent('download');await page.locator('#mz-export').click();
+    await (await pending).saveAs('qa/hunter-comparison-round.json');
+    const log=JSON.parse(await readFile('qa/hunter-comparison-round.json','utf8'));
+    assert.equal(log.mode,'hunters');assert.equal(log.shared.role,'runner');assert.equal(log.runner.id,'demo-safe');
+    assert.equal(log.entries.length,4);assert.equal(new Set(log.entries.map(e=>e.source)).size,1);
+    assert.equal(new Set(log.entries.map(e=>e.hunter.id)).size,4);
+    for(const entry of log.entries){assert.equal(entry.runner.id,'demo-safe');assert.deepEqual(entry.history[0].player,log.map.start);assert('capture' in entry.score)}
+    await page.locator('[data-focus="builtin-my-own"]').click();await page.locator('#mz-source').click();
+    assert((await page.locator('#doc-body').textContent()).includes('迷宫策略：稳健寻路'));
+    assert((await page.locator('#doc-body').textContent()).includes('追逐策略：我自己写的'));await page.locator('#close-doc').click();
+    await page.locator('#mz-seek').fill('3');await page.locator('#mz-seek').dispatchEvent('input');
+    assert((await page.locator('#mz-clock').textContent()).includes('回放'));
+    await page.locator('#mz-reset').click();await page.locator('#mz-start').click();
+    await page.waitForFunction(()=>document.querySelector('#mz-phase')?.textContent==='比赛结束',null,{timeout:45000});
+    assert.equal(await page.locator('.mz-ranking tbody').textContent(),ranking);
+    await page.screenshot({path:'qa/hunter-comparison-desktop.png',fullPage:true});
+    await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+    await page.screenshot({path:'qa/hunter-comparison-mobile.png',fullPage:true});
+    await page.locator('#mz-reset').click();await page.locator('#mz-start').click();
+    await page.waitForFunction(()=>Number(document.querySelector('#mz-clock')?.textContent.split(' /')[0])>=1);
+    await page.locator('#mz-mode-runners').click();
+    assert.equal(await page.locator('.mz-card').count(),3);assert((await page.locator('#mz-clock').textContent()).startsWith('0 /'));
+    assert.equal(await page.locator('iframe[title="迷宫策略隔离执行器"]').count(),0);
+    assert.deepEqual(errors,[]);
+  }finally{await context.close()}
+});
+
+test('hunter comparison isolates a bad hunter but voids the round on shared runner failure',async()=>{
+  const {context,page,errors}=await open();
+  try{
+    await page.locator('#mz-demos').uncheck();await page.locator('#mz-mode-hunters').click();
+    assert.equal(await page.locator('.mz-card').count(),0);
+    await add(page,'GOOD','function decide(){return {action:"wait"}}',waitHunter);
+    await add(page,'BAD HUNTER','function decide(){return {action:"wait"}}','function decide(){throw Error("hunter broke")}');
+    await page.locator('#mz-shared').selectOption({label:'GOOD'});
+    for(let tick=1;tick<=3;tick++){
+      await page.locator('#mz-step').click();await page.waitForFunction(tick=>document.querySelector('#mz-clock')?.textContent.startsWith(tick+' /'),tick);
+    }
+    assert.deepEqual(await page.locator('[data-status]').allTextContents(),['追逐中','追逐策略错误','追逐中']);
+    assert.equal(await page.locator('.mz-total').last().textContent(),'0');assert.equal(await page.locator('#mz-phase').textContent(),'已暂停');
+    await add(page,'BAD RUNNER','function decide(){throw Error("shared runner broke")}',waitHunter);
+    await page.locator('#mz-shared').selectOption({label:'BAD RUNNER'});await page.locator('#mz-step').click();
+    await page.waitForFunction(()=>document.querySelector('#mz-phase')?.textContent==='本轮作废');
+    assert((await page.locator('#mz-notice').textContent()).includes('共同迷宫策略「BAD RUNNER」'));
+    assert((await page.locator('.mz-total').allTextContents()).every(text=>text==='—'));
+    assert.equal(await page.locator('iframe[title="迷宫策略隔离执行器"]').count(),0);assert.deepEqual(errors,[]);
   }finally{await context.close()}
 });

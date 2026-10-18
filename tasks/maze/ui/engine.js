@@ -106,13 +106,23 @@ export function step(map,previous,response={action:'wait'},pursuit={actions:[]})
   return s;
 }
 export function failState(state,message){return {...structuredClone(state),status:'error',error:String(message).slice(0,300),finishTick:state.tick,events:['策略错误：'+String(message).slice(0,300)]}}
-export function score(map,s){
+export function score(map,s,mode='runners'){
   const escaped=s.status==='escaped';
-  const parts={escape:escaped?6000:0,speed:escaped?Math.floor(2000*(1-s.finishTick/map.maxTicks)):0,
+  const parts=mode==='hunters'?{
+    capture:s.status==='dead'?6000:s.status==='timeout'?4000:0,
+    speed:s.status==='dead'?Math.floor(2000*(1-s.finishTick/map.maxTicks)):0,
+    damage:Math.floor(1000*(3-s.hp)/3),denial:Math.floor(1000*(1-s.visited.length/map.floorCount)),
+  }:{escape:escaped?6000:0,speed:escaped?Math.floor(2000*(1-s.finishTick/map.maxTicks)):0,
     loot:Math.floor(1000*s.coins.length/map.coins.length),explore:Math.floor(500*s.visited.length/map.floorCount),health:Math.floor(500*s.hp/3)};
   if(s.status==='error')for(const k in parts)parts[k]=0;
   return {total:Object.values(parts).reduce((a,b)=>a+b,0),...parts};
 }
-export function rank(map,entries){
-  return [...entries].sort((a,b)=>score(map,b.state).total-score(map,a.state).total||(a.state.finishTick??Infinity)-(b.state.finishTick??Infinity)||b.state.hp-a.state.hp||a.id.localeCompare(b.id));
+export function rank(map,entries,mode='runners'){
+  return [...entries].sort((a,b)=>{
+    const diff=score(map,b.state,mode).total-score(map,a.state,mode).total;
+    if(diff)return diff;
+    const aTick=a.state.finishTick??Infinity,bTick=b.state.finishTick??Infinity;
+    if(mode==='hunters')return (a.state.status==='dead'&&b.state.status==='dead'?aTick-bTick:bTick-aTick)||a.state.hp-b.state.hp||a.id.localeCompare(b.id);
+    return aTick-bTick||b.state.hp-a.state.hp||a.id.localeCompare(b.id);
+  });
 }
