@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "task": "maze",
+  "model": "minimax-3-1-flash",
+  "model_version": "minimax-3-1-flash",
+  "revisions": [
+    {
+      "id": "v1",
+      "effective_from": "2026-10-18T00:00:00+08:00",
+      "directory": "revisions/v1",
+      "note": "首次提交走迷宫与追逐策略",
+      "prompt_sha256": "75e8d858c589a3fbea1d520834ae5f090bfceb9cb66d37a0f3c56ff8f92d2deb"
+    }
+  ]
+}
