@@ -51,14 +51,14 @@
         "cooldown": 0
       },
       "day": "2026-10-19",
-      "last_as_of": "2026-10-19T11:22:54+08:00",
-      "last_slot": "2026-10-19T11:20:00+08:00",
+      "last_as_of": "2026-10-19T13:19:24+08:00",
+      "last_slot": "2026-10-19T13:10:00+08:00",
       "rebalance_date": "",
       "revision": "v1"
     },
     "last_date": "2026-10-19",
-    "last_timestamp": "2026-10-19T11:22:54+08:00",
-    "last_slot": "2026-10-19T11:20:00+08:00",
+    "last_timestamp": "2026-10-19T13:19:24+08:00",
+    "last_slot": "2026-10-19T13:10:00+08:00",
     "interest_remainder": 0,
     "equity": 100000.0,
     "peak": 100000.0,
@@ -141,6 +141,35 @@
       ],
       "corporate_actions": [],
       "market_sha256": "60b3b13ff4afeed804c2e87329a8567692fbfb86997938f439eca1fa76909ed2"
+    },
+    {
+      "slot": "2026-10-19T13:10:00+08:00",
+      "timestamp": "2026-10-19T13:19:24+08:00",
+      "date": "2026-10-19",
+      "revision": "v1",
+      "status": "ok",
+      "cash": 100000.0,
+      "debt": 0,
+      "equity": 100000.0,
+      "return": 0.0,
+      "max_drawdown": 0,
+      "positions": {},
+      "events": [
+        {
+          "type": "gap",
+          "message": "两次实际采集间隔超过计划；期间没有模拟成交",
+          "from": "2026-10-19T11:22:54+08:00",
+          "to": "2026-10-19T13:19:24+08:00"
+        },
+        {
+          "type": "signal",
+          "orders": [],
+          "submitted_at": "2026-10-19T13:19:46+08:00",
+          "commentary": "可用趋势样本0/4，或持仓报价缺失；暂停普通调仓。"
+        }
+      ],
+      "corporate_actions": [],
+      "market_sha256": "6e8ae92d2699967c24afe92435cfbdeb1927b8a148a8b66b1a38408241191aec"
     }
   ],
   "revision_registry": {
