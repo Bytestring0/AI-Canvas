@@ -1,0 +1,111 @@
+{
+  "schema_version": 2,
+  "task": "honest-money",
+  "model": "gpt-6-1-sol",
+  "model_version": "填写确切模型版本",
+  "initial_cash": 100000,
+  "state": {
+    "cash": 100000.0,
+    "positions": {},
+    "pending": [],
+    "memory": {
+      "strategy_schema": 1,
+      "symbols": {
+        "000001.SZ": {
+          "days": [],
+          "reset_on": ""
+        },
+        "000333.SZ": {
+          "days": [],
+          "reset_on": ""
+        },
+        "000651.SZ": {
+          "days": [],
+          "reset_on": ""
+        },
+        "600036.SH": {
+          "days": [],
+          "reset_on": ""
+        },
+        "600519.SH": {
+          "days": [],
+          "reset_on": ""
+        },
+        "600900.SH": {
+          "days": [],
+          "reset_on": ""
+        },
+        "601318.SH": {
+          "days": [],
+          "reset_on": ""
+        },
+        "601398.SH": {
+          "days": [],
+          "reset_on": ""
+        }
+      },
+      "trails": {},
+      "bans": {},
+      "risk": {
+        "next_dd": 0.12,
+        "cooldown": 0
+      },
+      "day": "2026-10-19",
+      "last_as_of": "2026-10-19T11:06:58+08:00",
+      "last_slot": "2026-10-19T11:00:00+08:00",
+      "rebalance_date": "",
+      "revision": "v1"
+    },
+    "last_date": "2026-10-19",
+    "last_timestamp": "2026-10-19T11:06:58+08:00",
+    "last_slot": "2026-10-19T11:00:00+08:00",
+    "interest_remainder": 0,
+    "equity": 100000.0,
+    "peak": 100000.0,
+    "max_drawdown": 0,
+    "active_revision": "v1"
+  },
+  "sessions": [
+    {
+      "slot": "2026-10-19T11:00:00+08:00",
+      "timestamp": "2026-10-19T11:06:58+08:00",
+      "date": "2026-10-19",
+      "revision": "v1",
+      "status": "ok",
+      "cash": 100000.0,
+      "debt": 0,
+      "equity": 100000.0,
+      "return": 0.0,
+      "max_drawdown": 0,
+      "positions": {},
+      "events": [
+        {
+          "type": "revision",
+          "revision": "v1",
+          "previous": null,
+          "note": "初次提交；由参赛 AI 填写策略摘要",
+          "sha256": "3c31360d8fa7cc521fd39b93588f05680d204d66c8965148cb0f6fbdf9748ed0"
+        },
+        {
+          "type": "signal",
+          "orders": [],
+          "submitted_at": "2026-10-19T11:07:18+08:00",
+          "commentary": "可用趋势样本0/4，或持仓报价缺失；暂停普通调仓。"
+        }
+      ],
+      "corporate_actions": [],
+      "market_sha256": "34e0bd2af85dbefd32c56906893a9e10f6e0ff0ad06b18d1dc3d2cf0fb7b58e8"
+    }
+  ],
+  "revision_registry": {
+    "v1": {
+      "metadata": {
+        "id": "v1",
+        "directory": "revisions/v1",
+        "note": "初次提交；由参赛 AI 填写策略摘要",
+        "effective_from": "2026-10-19"
+      },
+      "sha256": "3c31360d8fa7cc521fd39b93588f05680d204d66c8965148cb0f6fbdf9748ed0"
+    }
+  }
+}
