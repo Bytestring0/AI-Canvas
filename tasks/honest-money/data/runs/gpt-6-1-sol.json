@@ -50,15 +50,15 @@
         "next_dd": 0.12,
         "cooldown": 0
       },
-      "day": "2026-10-19",
-      "last_as_of": "2026-10-19T13:19:24+08:00",
-      "last_slot": "2026-10-19T13:10:00+08:00",
+      "day": "2026-10-20",
+      "last_as_of": "2026-10-20T13:26:22+08:00",
+      "last_slot": "2026-10-20T13:20:00+08:00",
       "rebalance_date": "",
       "revision": "v1"
     },
-    "last_date": "2026-10-19",
-    "last_timestamp": "2026-10-19T13:19:24+08:00",
-    "last_slot": "2026-10-19T13:10:00+08:00",
+    "last_date": "2026-10-20",
+    "last_timestamp": "2026-10-20T13:26:22+08:00",
+    "last_slot": "2026-10-20T13:20:00+08:00",
     "interest_remainder": 0,
     "equity": 100000.0,
     "peak": 100000.0,
@@ -170,6 +170,29 @@
       ],
       "corporate_actions": [],
       "market_sha256": "6e8ae92d2699967c24afe92435cfbdeb1927b8a148a8b66b1a38408241191aec"
+    },
+    {
+      "slot": "2026-10-20T13:20:00+08:00",
+      "timestamp": "2026-10-20T13:26:22+08:00",
+      "date": "2026-10-20",
+      "revision": "v1",
+      "status": "ok",
+      "cash": 100000.0,
+      "debt": 0,
+      "equity": 100000.0,
+      "return": 0.0,
+      "max_drawdown": 0,
+      "positions": {},
+      "events": [
+        {
+          "type": "signal",
+          "orders": [],
+          "submitted_at": "2026-10-20T13:26:43+08:00",
+          "commentary": "可用趋势样本0/4，或持仓报价缺失；暂停普通调仓。"
+        }
+      ],
+      "corporate_actions": [],
+      "market_sha256": "d9307a1b7dd11003da9635772b56eb61cff1d08672deb9891ff618cfb1d3fd3b"
     }
   ],
   "revision_registry": {
