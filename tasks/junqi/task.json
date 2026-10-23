@@ -1,0 +1,16 @@
+{
+  "id": "junqi",
+  "number": "04",
+  "title": "将军棋",
+  "subtitle": "一纸迷雾棋盘，各自运筹帷幄。",
+  "kind": "game",
+  "prompt": "prompt.md",
+  "tags": ["策略编程", "多人对战", "战争迷雾"],
+  "readme": "README.md",
+  "description": "参照 generals.io 规则的征服对战：战争迷雾、城市与将军产兵、擒王转让领土。2~16 人自由混战或组队，支持真人下场，实时记分与跨局战绩排行。",
+  "view": "ui/view.js",
+  "runtime": "runtime",
+  "gallery_view": true,
+  "submission_entry": "strategy.js",
+  "schedule": null
+}
